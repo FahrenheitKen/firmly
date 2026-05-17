@@ -45,7 +45,8 @@
       "Bash(tasklist /fi \"imagename eq php.exe\")",
       "Bash(tasklist /fi \"imagename eq node.exe\")",
       "Bash(taskkill //F //IM node.exe)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(wc:*)"
     ]
   }
 }
