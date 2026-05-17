@@ -1,0 +1,14 @@
+[2026-05-15T21:26:45.267Z] PROMPT
+============================================================
+Analyze test coverage and identify gaps:
+- Find untested functions and classes
+- Identify edge cases not covered
+- Suggest new test scenarios
+- Check for missing error handling tests
+- Identify integration test gaps
+
+For each gap, provide a test skeleton.
+
+## Instructions
+
+Analyze the codebase and provide your response following the format specified in the task.

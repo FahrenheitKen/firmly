@@ -1,0 +1,13 @@
+[2026-05-16T01:07:01.029Z] RESULT
+============================================================
+{
+  "success": false,
+  "output": "",
+  "durationMs": 41,
+  "model": "sonnet",
+  "sandboxMode": "permissive",
+  "workerType": "testgaps",
+  "timestamp": "2026-05-16T01:07:01.029Z",
+  "executionId": "testgaps_1778893620988_nr57zk",
+  "error": "spawn claude ENOENT"
+}

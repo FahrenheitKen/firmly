@@ -38,7 +38,14 @@
       "Bash(taskkill //F //FI \"IMAGENAME eq php.exe\" //FI \"WINDOWTITLE eq *artisan*\")",
       "Bash(taskkill //F //FI \"WINDOWTITLE eq *next*\")",
       "Bash(npm run:*)",
-      "Bash(php -l app/Http/Controllers/Api/CaseController.php)"
+      "Bash(php -l app/Http/Controllers/Api/CaseController.php)",
+      "Bash(echo \"Queue worker PID: $!\")",
+      "Bash(echo \"Scheduler PID: $!\")",
+      "Bash(grep -A 15 \"Schema::create.*currenc\" /c/laragon/www/Firmly/backend/database/migrations/*.php)",
+      "Bash(tasklist /fi \"imagename eq php.exe\")",
+      "Bash(tasklist /fi \"imagename eq node.exe\")",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(grep:*)"
     ]
   }
 }
