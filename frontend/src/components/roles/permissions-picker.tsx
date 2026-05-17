@@ -1,0 +1,141 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
+
+interface Props {
+  selectedPerms: string[];
+  onToggle: (perm: string) => void;
+  token: string;
+}
+
+const EXCLUDED_GROUPS = new Set(['product', 'sell', 'purchase']);
+
+const groupPalette: Record<string, { bg: string; dot: string; label: string }> = {
+  stock:    { bg: 'bg-amber-50', dot: 'bg-amber-500', label: 'text-amber-700' },
+  report:   { bg: 'bg-rose-50', dot: 'bg-rose-500', label: 'text-rose-700' },
+  user:     { bg: 'bg-cyan-50', dot: 'bg-cyan-500', label: 'text-cyan-700' },
+  setting:  { bg: 'bg-primary/5', dot: 'bg-primary', label: 'text-primary' },
+  general:  { bg: 'bg-background', dot: 'bg-muted', label: 'text-muted' },
+};
+
+const permLabels: Record<string, string> = {
+  view: 'View',
+  create: 'Create',
+  edit: 'Edit',
+  update: 'Update',
+  delete: 'Delete',
+  manage: 'Manage',
+  print: 'Print',
+  export: 'Export',
+  import: 'Import',
+  access: 'Access',
+  configure: 'Configure',
+  assign: 'Assign',
+};
+
+const permDescriptions: Record<string, string> = {
+  'stock.view': 'View stock levels and movements',
+  'stock.create': 'Record stock adjustments',
+  'stock.edit': 'Modify stock entries',
+  'stock.delete': 'Remove stock movement records',
+  'report.view': 'View all reports and analytics',
+  'report.export': 'Export reports to files',
+  'user.view': 'View user accounts and profiles',
+  'user.create': 'Invite and add new users',
+  'user.edit': 'Modify user roles and details',
+  'user.delete': 'Remove users from the system',
+  'setting.view': 'View system settings',
+  'setting.edit': 'Modify system configuration',
+  'setting.access': 'Access sensitive settings area',
+  'general.manage': 'General system management',
+  'general.access': 'Basic system access',
+};
+
+export default function PermissionsPicker({ selectedPerms, onToggle, token }: Props) {
+  const [allPermissions, setAllPermissions] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.get<{ permissions: string[] }>('/permissions', token)
+      .then((res) => setAllPermissions(res.permissions));
+  }, [token]);
+
+  const permGroups: Record<string, string[]> = {};
+  allPermissions.forEach((p) => {
+    const group = p.split('.')[0] || 'general';
+    if (EXCLUDED_GROUPS.has(group)) return;
+    if (!permGroups[group]) permGroups[group] = [];
+    permGroups[group].push(p);
+  });
+
+  const selectedSet = new Set(selectedPerms);
+  const formatGroupName = (g: string) => g.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {Object.entries(permGroups).map(([group, perms]) => {
+        const palette = groupPalette[group] || groupPalette.general;
+        const selectedCount = perms.filter((p) => selectedSet.has(p)).length;
+        return (
+          <div key={group} className={`${palette.bg} rounded-xl border border-border/60 p-4`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${palette.dot}`} />
+                <span className={`text-sm font-semibold ${palette.label}`}>{formatGroupName(group)}</span>
+              </div>
+              <span className="text-xs text-muted">{selectedCount}/{perms.length}</span>
+            </div>
+            <div className="space-y-1.5">
+              {perms.map((p) => {
+                const checked = selectedSet.has(p);
+                const action = p.split('.').pop() || '';
+                return (
+                  <label
+                    key={p}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+                      checked
+                        ? 'bg-card-bg shadow-sm border border-border/80'
+                        : 'hover:bg-card-bg/60'
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all shrink-0 ${
+                      checked
+                        ? 'bg-primary border-primary'
+                        : 'border-border bg-card-bg'
+                    }`}>
+                      {checked && (
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => onToggle(p)}
+                        className="absolute opacity-0"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`text-sm ${checked ? 'font-medium text-foreground' : 'text-foreground/60'}`}>
+                        {permLabels[action] || action}
+                      </span>
+                      <div className="relative group/icon ml-auto">
+                        <svg className="w-3.5 h-3.5 text-muted/40 hover:text-muted transition-colors cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div className="absolute bottom-full right-0 mb-2 w-56 px-3 py-2 bg-primary text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-10 pointer-events-none">
+                          {permDescriptions[p] || `Allows ${action} access for ${group}`}
+                          <div className="absolute top-full right-3 -translate-y-1/2 border-4 border-transparent border-t-primary" />
+                        </div>
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

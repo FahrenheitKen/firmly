@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --background: #F1F5F9;
+  --foreground: #0F172A;
+  --primary: #1E3A5F;
+  --primary-dark: #15293F;
+  --sidebar-bg: #1E3A5F;
+  --sidebar-text: #CBD5E1;
+  --sidebar-active: #E6A817;
+  --card-bg: #FFFFFF;
+  --border: #C8D0DC;
+  --muted: #4B5563;
+  --secondary: #4B7F52;
+  --accent: #E6A817;
+  --success: #4B7F52;
+  --danger: #EF4444;
+  --warning: #E6A817;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-dark);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-card-bg: var(--card-bg);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-weight: 450;
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}

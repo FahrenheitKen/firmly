@@ -1,0 +1,5 @@
+.claude/
+*.log
+.git_bak/
+backend/.git_bak/
+frontend/.git_bak/
