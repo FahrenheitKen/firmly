@@ -10,6 +10,14 @@ import Modal from '@/components/ui/modal';
 import SearchableSelect from '@/components/ui/searchable-select';
 import DatePicker from '@/components/ui/date-picker';
 
+interface OpposingCounsel {
+  id: number;
+  name: string;
+  firm: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
 interface CaseItem {
   id: number;
   case_number: string;
@@ -25,6 +33,8 @@ interface CaseItem {
   client?: { id: number; first_name?: string; last_name?: string; business_name?: string } | null;
   assigned_to: { id: number; first_name: string; last_name: string } | null;
   created_by?: { id: number; first_name: string; last_name: string } | null;
+  opposing_counsel_id: number | null;
+  opposing_counsel?: { id: number; name: string; firm: string | null } | null;
   court: string | null;
   judge: string | null;
   filed_date: string | null;
@@ -78,6 +88,12 @@ export default function CasesPage() {
   const [caseFormat, setCaseFormat] = useState('');
   const [caseCounter, setCaseCounter] = useState(0);
 
+  const [step, setStep] = useState<1 | 2>(1);
+  const [opposingCounsels, setOpposingCounsels] = useState<OpposingCounsel[]>([]);
+  const [showAddOC, setShowAddOC] = useState(false);
+  const [newOC, setNewOC] = useState({ name: '', firm: '', phone: '', email: '' });
+  const [savingOC, setSavingOC] = useState(false);
+
   const [showEventModal, setShowEventModal] = useState(false);
   const [eventCaseId, setEventCaseId] = useState<number | null>(null);
   const [eventForm, setEventForm] = useState({ event_type: 'Bring Up', event_date: '' });
@@ -100,6 +116,7 @@ export default function CasesPage() {
     filed_date: string;
     is_recovery: boolean | null;
     case_type: string;
+    opposing_counsel_id: string;
   }>({
     title: '',
     client_id: '',
@@ -112,6 +129,7 @@ export default function CasesPage() {
     filed_date: '',
     is_recovery: null,
     case_type: 'Plaintiff',
+    opposing_counsel_id: '',
   });
 
   useEffect(() => {
@@ -180,16 +198,21 @@ export default function CasesPage() {
   };
 
   const openCreate = () => {
-    setForm({ title: '', client_id: '', client_reference: '', parties: '', our_reference: '', case_number: '', assigned_to: '', court: '', filed_date: '', is_recovery: null, case_type: 'Plaintiff' });
+    setForm({ title: '', client_id: '', client_reference: '', parties: '', our_reference: '', case_number: '', assigned_to: '', court: '', filed_date: '', is_recovery: null, case_type: 'Plaintiff', opposing_counsel_id: '' });
     setFiles([]);
     setError('');
+    setStep(1);
+    setShowAddOC(false);
+    setNewOC({ name: '', firm: '', phone: '', email: '' });
     setShowModal(true);
     if (!token) return;
     Promise.all([
       api.get<{ clients: Client[] }>('/clients', token),
       api.get<{ users: User[] }>('/users', token),
       api.get<{ business: Record<string, unknown> }>('/business', token),
-    ]).then(([cRes, uRes, bRes]) => {
+      api.get<{ opposing_counsels: OpposingCounsel[] }>('/opposing-counsels', token).catch(() => ({ opposing_counsels: [] })),
+    ]).then(([cRes, uRes, bRes, ocRes]) => {
+      setOpposingCounsels(ocRes.opposing_counsels);
       setClients(cRes.clients);
       setUsers(uRes.users);
       const b = bRes.business;
@@ -229,6 +252,7 @@ export default function CasesPage() {
           title: form.title,
           client_id: form.client_id || null,
           client_reference: form.client_reference || null,
+          opposing_counsel_id: form.opposing_counsel_id || null,
           description: form.parties || null,
           our_reference: form.our_reference || null,
           assigned_to: form.assigned_to || null,
@@ -261,6 +285,7 @@ export default function CasesPage() {
     assigned_to: '',
     court: '',
     judge: '',
+    opposing_counsel_id: '',
     filed_date: '',
     closed_date: '',
     outcome: '',
@@ -284,6 +309,7 @@ export default function CasesPage() {
       assigned_to: caseItem.assigned_to?.id ? String(caseItem.assigned_to.id) : '',
       court: caseItem.court || '',
       judge: caseItem.judge || '',
+      opposing_counsel_id: caseItem.opposing_counsel_id ? String(caseItem.opposing_counsel_id) : '',
       filed_date: caseItem.filed_date ? caseItem.filed_date.split('T')[0] : '',
       closed_date: caseItem.closed_date ? caseItem.closed_date.split('T')[0] : '',
       outcome: caseItem.outcome || '',
@@ -292,14 +318,18 @@ export default function CasesPage() {
       status: caseItem.status || 'Open',
       priority: caseItem.priority || 'Medium',
     });
+    setShowAddOC(false);
+    setNewOC({ name: '', firm: '', phone: '', email: '' });
     setShowEditModal(true);
     if (!token) return;
     Promise.all([
       api.get<{ clients: Client[] }>('/clients', token),
       api.get<{ users: User[] }>('/users', token),
-    ]).then(([cRes, uRes]) => {
+      api.get<{ opposing_counsels: OpposingCounsel[] }>('/opposing-counsels', token).catch(() => ({ opposing_counsels: [] })),
+    ]).then(([cRes, uRes, ocRes]) => {
       setClients(cRes.clients);
       setUsers(uRes.users);
+      setOpposingCounsels(ocRes.opposing_counsels);
     }).catch(() => {});
   };
 
@@ -317,6 +347,7 @@ export default function CasesPage() {
         assigned_to: editForm.assigned_to || '',
         court: editForm.court,
         judge: editForm.judge,
+        opposing_counsel_id: editForm.opposing_counsel_id || null,
         filed_date: editForm.filed_date || null,
         closed_date: editForm.closed_date || null,
         outcome: editForm.outcome,
@@ -336,6 +367,24 @@ export default function CasesPage() {
       setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveOpposingCounsel = async (onSaved: (id: string) => void) => {
+    if (!token || !newOC.name.trim()) return;
+    setSavingOC(true);
+    try {
+      const res = await api.post<{ opposing_counsel: OpposingCounsel }>('/opposing-counsels', newOC, token);
+      const created = res.opposing_counsel;
+      setOpposingCounsels((prev) => [...prev, created]);
+      setShowAddOC(false);
+      setNewOC({ name: '', firm: '', phone: '', email: '' });
+      onSaved(String(created.id));
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setError(e.message || 'Failed to save opposing counsel');
+    } finally {
+      setSavingOC(false);
     }
   };
 
@@ -522,125 +571,228 @@ export default function CasesPage() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Case" size="lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Subject *</label>
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value.toUpperCase() })} required className={inputClass} placeholder="Case subject" />
+      <Modal open={showModal} onClose={() => { setShowModal(false); setStep(1); }} title="Add Case" size="lg">
+        {/* Step indicator */}
+        <div className="flex items-center mb-6">
+          <div className={`flex items-center gap-2 text-sm font-medium ${step === 1 ? 'text-primary' : 'text-muted'}`}>
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step === 1 ? 'bg-primary text-white' : 'bg-primary/20 text-primary'}`}>1</div>
+            Case Details
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <SearchableSelect
-              label="Client"
-              value={form.client_id}
-              onChange={(v) => {
-                setForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, prev.is_recovery ?? false, user?.active_location?.city) }));
-              }}
-              options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
-              placeholder="Search client..."
-            />
-            <SearchableSelect
-              label="Assigned To"
-              value={form.assigned_to}
-               onChange={(v) => setForm((prev) => ({ ...prev, assigned_to: v }))}
-              options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
-              placeholder="Search user..."
-            />
+          <div className="flex-1 h-px bg-border mx-3" />
+          <div className={`flex items-center gap-2 text-sm font-medium ${step === 2 ? 'text-primary' : 'text-muted'}`}>
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step === 2 ? 'bg-primary text-white' : 'bg-border text-muted'}`}>2</div>
+            Opposing Counsel &amp; Documents
           </div>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Client Reference</label>
-            <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
-          </div>
+        <form onSubmit={handleSubmit}>
+          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg mb-4">{error}</div>}
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Parties</label>
-            <textarea value={form.parties} onChange={(e) => setForm({ ...form, parties: e.target.value })} rows={3} className={inputClass} placeholder="List the parties involved" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
-              <div className="flex gap-4">
-                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
-                    {form.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
-                    <input type="radio" name="is_recovery" checked={form.is_recovery === true} onChange={() => setForm((prev) => ({ ...prev, is_recovery: true, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, true, user?.active_location?.city) }))} className="absolute opacity-0" />
-                  </div>
-                  <span>Yes</span>
-                </label>
-                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
-                    {form.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
-                    <input type="radio" name="is_recovery" checked={form.is_recovery === false} onChange={() => setForm((prev) => ({ ...prev, is_recovery: false, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) }))} className="absolute opacity-0" />
-                  </div>
-                  <span>No</span>
-                </label>
+          {/* Step 1: Case Details */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Subject *</label>
+                <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case subject" />
               </div>
-              {form.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Case Type</label>
-              <div className="flex gap-4">
-                {['Plaintiff', 'Defendant'].map((type) => (
-                  <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.case_type === type ? 'border-primary' : 'border-gray-300'}`}>
-                      {form.case_type === type && <div className="w-2 h-2 rounded-full bg-primary" />}
-                      <input type="radio" name="case_type" checked={form.case_type === type} onChange={() => setForm((prev) => ({ ...prev, case_type: type }))} className="absolute opacity-0" />
-                    </div>
-                    <span>{type}</span>
-                  </label>
-                ))}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <SearchableSelect
+                  label="Client"
+                  value={form.client_id}
+                  onChange={(v) => {
+                    setForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, prev.is_recovery ?? false, user?.active_location?.city) }));
+                  }}
+                  options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
+                  placeholder="Search client..."
+                />
+                <SearchableSelect
+                  label="Assigned To"
+                  value={form.assigned_to}
+                  onChange={(v) => setForm((prev) => ({ ...prev, assigned_to: v }))}
+                  options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+                  placeholder="Search user..."
+                />
               </div>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Our Reference</label>
-              <input value={form.our_reference} readOnly className={`${inputClass} bg-gray-50 cursor-not-allowed`} placeholder="Auto-generated" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Case Number</label>
-              <input value={form.case_number} onChange={(e) => setForm({ ...form, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Leave blank to auto-generate" />
-            </div>
-          </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Client Reference</label>
+                <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Station</label>
-            <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
-          </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Parties</label>
+                <textarea value={form.parties} onChange={(e) => setForm({ ...form, parties: e.target.value })} rows={3} className={inputClass} placeholder="List the parties involved" />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Filed Date</label>
-            <input type="date" value={form.filed_date} onChange={(e) => setForm({ ...form, filed_date: e.target.value })} className={inputClass} />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium">Documents</label>
-              <button type="button" onClick={addFile} className="text-xs text-primary hover:underline font-medium">+ Add</button>
-            </div>
-            <div className="space-y-2">
-              {files.map((_, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input type="file" onChange={(e) => updateFile(i, e.target.files?.[0] || null)} className="flex-1 text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/5 file:text-primary hover:file:bg-primary/10" />
-                  <button type="button" onClick={() => removeFile(i)} className="p-1.5 text-danger hover:bg-danger/5 rounded-lg transition-colors">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                  </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
+                  <div className="flex gap-4">
+                    <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
+                        {form.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
+                        <input type="radio" name="is_recovery" checked={form.is_recovery === true} onChange={() => setForm((prev) => ({ ...prev, is_recovery: true, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, true, user?.active_location?.city) }))} className="absolute opacity-0" />
+                      </div>
+                      <span>Yes</span>
+                    </label>
+                    <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
+                        {form.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
+                        <input type="radio" name="is_recovery" checked={form.is_recovery === false} onChange={() => setForm((prev) => ({ ...prev, is_recovery: false, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) }))} className="absolute opacity-0" />
+                      </div>
+                      <span>No</span>
+                    </label>
+                  </div>
+                  {form.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
                 </div>
-              ))}
-            </div>
-          </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Case Type</label>
+                  <div className="flex gap-4">
+                    {['Plaintiff', 'Defendant'].map((type) => (
+                      <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.case_type === type ? 'border-primary' : 'border-gray-300'}`}>
+                          {form.case_type === type && <div className="w-2 h-2 rounded-full bg-primary" />}
+                          <input type="radio" name="case_type" checked={form.case_type === type} onChange={() => setForm((prev) => ({ ...prev, case_type: type }))} className="absolute opacity-0" />
+                        </div>
+                        <span>{type}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
-            <button type="submit" disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
-              {saving ? 'Saving...' : 'Create Case'}
-            </button>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Our Reference</label>
+                  <input value={form.our_reference} readOnly className={`${inputClass} bg-gray-50 cursor-not-allowed`} placeholder="Auto-generated" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Case Number</label>
+                  <input value={form.case_number} onChange={(e) => setForm({ ...form, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Leave blank to auto-generate" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Station</label>
+                <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Filed Date</label>
+                <input type="date" value={form.filed_date} onChange={(e) => setForm({ ...form, filed_date: e.target.value })} className={inputClass} />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-border">
+                <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!form.title.trim()) { setError('Subject is required'); return; }
+                    if (form.is_recovery === null) { setError('Please select if this is a recovery or not'); return; }
+                    setError('');
+                    setStep(2);
+                  }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors"
+                >
+                  Next
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Opposing Counsel & Documents */}
+          {step === 2 && (
+            <div className="space-y-5">
+              {/* Opposing Counsel */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium">Opposing Counsel</label>
+                  {!showAddOC && (
+                    <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+                  )}
+                </div>
+                <SearchableSelect
+                  value={form.opposing_counsel_id}
+                  onChange={(v) => setForm({ ...form, opposing_counsel_id: v })}
+                  options={[
+                    { value: '', label: 'Select opposing counsel' },
+                    ...opposingCounsels.map((oc) => ({ value: String(oc.id), label: oc.firm || oc.name })),
+                  ]}
+                  placeholder="Search opposing counsel..."
+                />
+                {showAddOC && (
+                  <div className="mt-3 p-4 bg-gray-50 border border-border rounded-xl space-y-3">
+                    <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Name *</label>
+                        <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Firm</label>
+                        <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Phone</label>
+                        <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Email</label>
+                        <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
+                      <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                        {savingOC ? 'Saving...' : 'Save & Select'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Documents */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium">Documents</label>
+                  <button type="button" onClick={addFile} className="text-xs text-primary hover:underline font-medium">+ Add File</button>
+                </div>
+                {files.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={addFile}
+                    className="w-full border-2 border-dashed border-border rounded-xl py-8 text-center text-sm text-muted hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    <svg className="w-6 h-6 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11v4m-2-2h4" /></svg>
+                    Click to attach documents (optional)
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    {files.map((_, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input type="file" onChange={(e) => updateFile(i, e.target.files?.[0] || null)} className="flex-1 text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/5 file:text-primary hover:file:bg-primary/10" />
+                        <button type="button" onClick={() => removeFile(i)} className="p-1.5 text-danger hover:bg-danger/5 rounded-lg transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between gap-3 pt-4 border-t border-border">
+                <button type="button" onClick={() => { setStep(1); setError(''); }} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  Back
+                </button>
+                <button type="submit" disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                  {saving ? 'Creating...' : 'Create Case'}
+                </button>
+              </div>
+            </div>
+          )}
         </form>
       </Modal>
 
@@ -672,10 +824,59 @@ export default function CasesPage() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Client Reference</label>
-            <input value={editForm.client_reference} onChange={(e) => setEditForm({ ...editForm, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Client Reference</label>
+              <input value={editForm.client_reference} onChange={(e) => setEditForm({ ...editForm, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium">Opposing Counsel</label>
+                {!showAddOC && (
+                  <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+                )}
+              </div>
+              <SearchableSelect
+                value={editForm.opposing_counsel_id}
+                onChange={(v) => setEditForm({ ...editForm, opposing_counsel_id: v })}
+                options={[
+                  { value: '', label: 'Select opposing counsel' },
+                  ...opposingCounsels.map((oc) => ({ value: String(oc.id), label: oc.firm || oc.name })),
+                ]}
+                placeholder="Search opposing counsel..."
+              />
+            </div>
           </div>
+
+          {showAddOC && (
+            <div className="p-4 bg-gray-50 border border-border rounded-xl space-y-3">
+              <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-muted mb-1">Name *</label>
+                  <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">Firm</label>
+                  <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">Phone</label>
+                  <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">Email</label>
+                  <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
+                <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setEditForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                  {savingOC ? 'Saving...' : 'Save & Select'}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-1">Parties</label>

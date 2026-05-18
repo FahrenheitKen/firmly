@@ -66,7 +66,7 @@ export default function CreateUserPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<Record<string, unknown>>({
-    surname: '', first_name: '', last_name: '', username: '', email: '',
+    surname: '', first_name: '', last_name: '', email: '',
     password: '', role_id: '', allow_login: true, contact_no: '',
     dob: '', gender: '', marital_status: '', blood_group: '',
     language: 'en', is_cmmsn_agnt: false, cmmsn_percent: 0,
@@ -227,7 +227,6 @@ export default function CreateUserPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input label="Username" required placeholder="johndoe" value={form.username as string} onChange={(e) => setForm({ ...form, username: e.target.value })} minLength={4} />
                   <Input label="Password" required type="password" placeholder="Min. 8 characters" value={form.password as string} onChange={(e) => setForm({ ...form, password: e.target.value })} minLength={8} />
                   <Select label="Role" required value={form.role_id as string} onChange={(e) => setForm({ ...form, role_id: Number(e.target.value) })}>
                     <option value="">Select Role</option>

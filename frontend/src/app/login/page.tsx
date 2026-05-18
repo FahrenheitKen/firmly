@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 
 function LoginForm() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,7 @@ function LoginForm() {
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
+      await login(email, password);
       router.push('/dashboard');
     } catch (err: unknown) {
       const e = err as { message?: string; errors?: Record<string, string[]> };
@@ -55,14 +55,14 @@ function LoginForm() {
           )}
 
           <div>
-            <label className="block text-sm font-medium mb-1.5">Username or Email</label>
+            <label className="block text-sm font-medium mb-1.5">Email</label>
             <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full px-3 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-sm"
-              placeholder="Enter username or email"
+              placeholder="Enter your email"
             />
           </div>
 

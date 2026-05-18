@@ -11,7 +11,6 @@ import { useToast } from '@/lib/toast-context';
 
 interface UserItem {
   id: number;
-  username: string;
   first_name: string;
   last_name: string | null;
   surname: string | null;
@@ -162,8 +161,7 @@ export default function UsersPage() {
             <thead>
               <tr className="border-b border-border bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium">Name</th>
-                <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Username</th>
-                <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Email</th>
+                <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Email</th>
                 <th className="text-left px-4 py-3 font-medium">Role</th>
                 <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Status</th>
                 <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Business ID</th>
@@ -175,10 +173,9 @@ export default function UsersPage() {
                 <tr key={u.id} className="border-b border-border last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="font-medium">{u.full_name}</div>
-                    <div className="text-xs text-muted sm:hidden">{u.username}</div>
+                    <div className="text-xs text-muted sm:hidden">{u.email || '-'}</div>
                   </td>
-                  <td className="px-4 py-3 hidden sm:table-cell">{u.username}</td>
-                  <td className="px-4 py-3 hidden md:table-cell">{u.email || '-'}</td>
+                  <td className="px-4 py-3 hidden sm:table-cell">{u.email || '-'}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full">{u.role}</span>
                   </td>

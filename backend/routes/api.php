@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\CaseDocumentController;
 use App\Http\Controllers\Api\CaseEmailController;
 use App\Http\Controllers\Api\CaseEventController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\OpposingCounselController;
 use App\Http\Controllers\Api\EmailAccountController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\UserManagementController;
@@ -46,6 +47,10 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Clients
     Route::apiResource('clients', ClientController::class);
     Route::post('/clients/{id}/toggle-active', [ClientController::class, 'toggleActive']);
+
+    // Opposing Counsel
+    Route::get('/opposing-counsels', [OpposingCounselController::class, 'index']);
+    Route::post('/opposing-counsels', [OpposingCounselController::class, 'store']);
 
     // Cases
     Route::apiResource('cases', CaseController::class);

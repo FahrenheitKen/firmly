@@ -26,8 +26,7 @@ class AuthController extends Controller
             'first_name' => 'required|string|max:255',
             'surname' => 'nullable|string|max:10',
             'last_name' => 'nullable|string|max:255',
-            'username' => 'required|string|min:4|max:255|unique:users',
-            'email' => 'nullable|email|unique:users',
+            'email' => 'required|email|unique:users',
             'password' => 'required|string|min:8|confirmed',
             'country' => 'required|string|max:255',
 
@@ -48,8 +47,7 @@ class AuthController extends Controller
                 'surname' => $validated['surname'] ?? null,
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'] ?? null,
-                'username' => $validated['username'],
-                'email' => $validated['email'] ?? null,
+                'email' => $validated['email'],
                 'password' => $validated['password'],
                 'language' => 'en',
                 'user_type' => 'user',
@@ -107,17 +105,15 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $request->validate([
-            'username' => 'required|string',
+            'email' => 'required|email',
             'password' => 'required|string',
         ]);
 
-        $user = User::where('username', $request->username)
-            ->orWhere('email', $request->username)
-            ->first();
+        $user = User::where('email', $request->email)->first();
 
         if (!$user || !Hash::check($request->password, $user->password) || !$user->allow_login) {
             throw ValidationException::withMessages([
-                'username' => ['The provided credentials are incorrect.'],
+                'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 

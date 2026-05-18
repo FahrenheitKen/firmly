@@ -55,4 +55,9 @@ class Cases extends Model
     {
         return $this->hasMany(CaseEvent::class, 'case_id');
     }
+
+    public function opposingCounsel()
+    {
+        return $this->belongsTo(\App\Models\OpposingCounsel::class, 'opposing_counsel_id');
+    }
 }

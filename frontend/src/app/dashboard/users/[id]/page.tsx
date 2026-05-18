@@ -92,7 +92,7 @@ export default function UserDetailPage() {
               <div className="pb-1">
                 <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{user.full_name as string}</h1>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                  <span className="text-sm text-gray-500">@{user.username as string}</span>
+                  <span className="text-sm text-gray-500">{user.email as string || ''}</span>
                   <span className="w-1 h-1 rounded-full bg-gray-300" />
                   <span className="text-sm font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-lg">{roleName}</span>
                   <span className="w-1 h-1 rounded-full bg-gray-300" />
@@ -157,7 +157,6 @@ export default function UserDetailPage() {
             </div>
             <div className="p-5">
               <div className="grid grid-cols-1 sm:grid-cols-2">
-                <Row label="Username" value={user.username as string} />
                 <Row label="Role" value={roleName} />
                 <Row label="Login Status" value={user.allow_login ? 'Allowed' : 'Disabled'} />
               </div>

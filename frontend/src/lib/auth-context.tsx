@@ -12,7 +12,6 @@ interface ActiveLocation {
 
 interface User {
   id: number;
-  username: string;
   first_name: string;
   last_name: string | null;
   surname: string | null;
@@ -30,7 +29,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   register: (data: Record<string, unknown>) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -65,8 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchUser]);
 
-  const login = async (username: string, password: string) => {
-    const res = await api.post<{ user: User; token: string }>('/login', { username, password });
+  const login = async (email: string, password: string) => {
+    const res = await api.post<{ user: User; token: string }>('/login', { email, password });
     setUser(res.user);
     setToken(res.token);
     localStorage.setItem('firmly_token', res.token);
@@ -95,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(null);
       setUser(null);
     }
-  }, []);
+  }, [token]);
 
   // Auto-logout after 2 hours of inactivity
   useEffect(() => {

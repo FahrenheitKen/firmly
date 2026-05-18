@@ -20,7 +20,7 @@ class CaseController extends Controller
 
         $cases = Cases::where('business_id', $businessId)
             ->where('location_id', $activeLocationId)
-            ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name'])
+            ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'opposingCounsel:id,name,firm'])
             ->when($request->client_id, fn($q, $cid) => $q->where('client_id', $cid))
             ->when($request->search, fn($q, $s) => $q->where(function ($q) use ($s) {
                 $q->where('title', 'like', "%{$s}%")
@@ -77,6 +77,7 @@ class CaseController extends Controller
         $validated = $request->validate([
             'client_id' => "nullable|exists:clients,id,business_id,{$businessId}",
             'client_reference' => 'nullable|string|max:255',
+            'opposing_counsel_id' => "nullable|exists:opposing_counsels,id,business_id,{$businessId}",
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'our_reference' => 'nullable|string|max:255',
@@ -149,14 +150,14 @@ class CaseController extends Controller
             }
         }
 
-        return response()->json(['case' => $case->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name'])], 201);
+        return response()->json(['case' => $case->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm'])], 201);
     }
 
     public function show(Request $request, int $id): JsonResponse
     {
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
-            ->with(['client', 'assignedTo', 'createdBy'])
+            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel'])
             ->findOrFail($id);
         return response()->json(['case' => $case]);
     }
@@ -174,6 +175,7 @@ class CaseController extends Controller
         $validated = $request->validate([
             'client_id' => "nullable|exists:clients,id,business_id,{$case->business_id}",
             'client_reference' => 'nullable|string|max:255',
+            'opposing_counsel_id' => "nullable|exists:opposing_counsels,id,business_id,{$case->business_id}",
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'case_type' => 'nullable|in:Plaintiff,Defendant',
@@ -195,7 +197,7 @@ class CaseController extends Controller
 
         $case->update($validated);
 
-        return response()->json(['case' => $case->fresh()->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name'])]);
+        return response()->json(['case' => $case->fresh()->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm'])]);
     }
 
     public function destroy(Request $request, int $id): JsonResponse

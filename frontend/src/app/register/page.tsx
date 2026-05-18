@@ -418,7 +418,7 @@ export default function RegisterPage() {
     time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     fy_start_month: '1', accounting_method: 'fifo',
     first_name: '', surname: '', last_name: '',
-    username: '', email: '', password: '', password_confirmation: '',
+    email: '', password: '', password_confirmation: '',
   });
   const [logo, setLogo] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string>('');
@@ -478,7 +478,7 @@ export default function RegisterPage() {
     }
     if (step === 2) {
       if (!form.first_name) { setError('First name is required'); return; }
-      if (!form.username || form.username.length < 4) { setError('Username must be at least 4 characters'); return; }
+      if (!form.email) { setError('Email is required'); return; }
       if (!form.password || form.password.length < 8) { setError('Password must be at least 8 characters'); return; }
       if (form.password !== form.password_confirmation) { setError('Passwords do not match'); return; }
     }
@@ -683,11 +683,7 @@ export default function RegisterPage() {
                     <input name="last_name" value={form.last_name} onChange={handleField} className={inputClass} placeholder="e.g. Doe" />
                   </div>
                   <div>
-                    <label className={labelClass}>Username <span className="text-danger">*</span></label>
-                    <input name="username" value={form.username} onChange={handleField} minLength={4} className={inputClass} placeholder="Min. 4 characters" />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Email</label>
+                    <label className={labelClass}>Email <span className="text-danger">*</span></label>
                     <input type="email" name="email" value={form.email} onChange={handleField} className={inputClass} placeholder="john@example.com" />
                   </div>
                   <div>
@@ -736,8 +732,7 @@ export default function RegisterPage() {
                     <h4 className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">Owner</h4>
                     <div className="bg-[#F4F6F9] rounded-lg p-4 space-y-2 text-sm">
                       <div className="flex justify-between"><span className="text-muted">Name</span><span className="font-medium text-foreground">{form.first_name} {form.last_name}</span></div>
-                      <div className="flex justify-between"><span className="text-muted">Username</span><span className="font-medium text-foreground">{form.username}</span></div>
-                      {form.email && <div className="flex justify-between"><span className="text-muted">Email</span><span className="font-medium text-foreground">{form.email}</span></div>}
+                      <div className="flex justify-between"><span className="text-muted">Email</span><span className="font-medium text-foreground">{form.email}</span></div>
                     </div>
                   </div>
                 </div>

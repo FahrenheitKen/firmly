@@ -22,6 +22,7 @@ interface CaseItem {
   assigned_to: { id: number; first_name: string; last_name: string } | null;
   court: string | null;
   judge: string | null;
+  opposing_counsel: string | null;
   filed_date: string | null;
   closed_date: string | null;
   outcome: string | null;
@@ -64,6 +65,7 @@ export default function EditCasePage() {
     assigned_to: '',
     court: '',
     judge: '',
+    opposing_counsel: '',
     filed_date: '',
     closed_date: '',
     outcome: '',
@@ -91,6 +93,7 @@ export default function EditCasePage() {
         assigned_to: c.assigned_to?.id ? String(c.assigned_to.id) : '',
         court: c.court || '',
         judge: c.judge || '',
+        opposing_counsel: c.opposing_counsel || '',
         filed_date: c.filed_date ? c.filed_date.split('T')[0] : '',
         closed_date: c.closed_date ? c.closed_date.split('T')[0] : '',
         outcome: c.outcome || '',
@@ -121,6 +124,7 @@ export default function EditCasePage() {
         assigned_to: form.assigned_to || null,
         court: form.court || null,
         judge: form.judge || null,
+        opposing_counsel: form.opposing_counsel || null,
         filed_date: form.filed_date || null,
         closed_date: form.closed_date || null,
         outcome: form.outcome || null,
@@ -178,10 +182,16 @@ export default function EditCasePage() {
             </div>
           </div>
 
-          {/* Client Reference */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Client Reference</label>
-            <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+          {/* Client Reference + Opposite Counsel */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Client Reference</label>
+              <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Opposite Counsel</label>
+              <input value={form.opposing_counsel} onChange={(e) => setForm({ ...form, opposing_counsel: e.target.value })} className={inputClass} placeholder="Opposing counsel name" />
+            </div>
           </div>
 
           {/* Parties */}

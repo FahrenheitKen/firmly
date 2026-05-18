@@ -29,6 +29,14 @@ interface CaseDocument {
   created_at: string;
 }
 
+interface OpposingCounsel {
+  id: number;
+  name: string;
+  firm: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
 interface CaseItem {
   id: number;
   case_number: string;
@@ -44,6 +52,8 @@ interface CaseItem {
   client?: { id: number; first_name?: string; last_name?: string; business_name?: string } | null;
   assigned_to?: { id: number; first_name: string; last_name: string } | null;
   created_by?: { id: number; first_name: string; last_name: string } | null;
+  opposing_counsel_id: number | null;
+  opposing_counsel?: OpposingCounsel | null;
   court: string | null;
   judge: string | null;
   filed_date: string | null;
@@ -111,10 +121,15 @@ export default function CaseDetailPage() {
   const [editForm, setEditForm] = useState({
     title: '', client_id: '', client_reference: '', parties: '',
     our_reference: '', case_number: '', assigned_to: '', court: '',
+    opposing_counsel_id: '',
     filed_date: '', closed_date: '', outcome: '',
     is_recovery: null as boolean | null, case_type: 'Plaintiff',
     status: 'Open', priority: 'Medium',
   });
+  const [opposingCounsels, setOpposingCounsels] = useState<OpposingCounsel[]>([]);
+  const [showAddOC, setShowAddOC] = useState(false);
+  const [newOC, setNewOC] = useState({ name: '', firm: '', phone: '', email: '' });
+  const [savingOC, setSavingOC] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadForm, setUploadForm] = useState({ document_name: '', document_date: '' });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -131,7 +146,13 @@ export default function CaseDetailPage() {
     if (!token || !params.id) return;
     setDocsLoading(true);
     api.get<{ documents: CaseDocument[] }>(`/cases/${params.id}/documents`, token)
-      .then((res) => setDocuments(res.documents))
+      .then((res) => setDocuments(
+        [...res.documents].sort((a, b) => {
+          const dateA = new Date(a.document_date || a.created_at).getTime();
+          const dateB = new Date(b.document_date || b.created_at).getTime();
+          return dateB - dateA;
+        })
+      ))
       .catch(() => {})
       .finally(() => setDocsLoading(false));
   }, [token, params.id]);
@@ -262,6 +283,7 @@ export default function CaseDetailPage() {
       case_number: c.case_number || '',
       assigned_to: c.assigned_to?.id ? String(c.assigned_to.id) : '',
       court: c.court || '',
+      opposing_counsel_id: c.opposing_counsel_id ? String(c.opposing_counsel_id) : '',
       filed_date: c.filed_date ? c.filed_date.split('T')[0] : '',
       closed_date: c.closed_date ? c.closed_date.split('T')[0] : '',
       outcome: c.outcome || '',
@@ -271,12 +293,13 @@ export default function CaseDetailPage() {
       priority: c.priority || 'Medium',
     });
     setEditSaveStatus('idle');
-    if (clients.length === 0 || users.length === 0) {
-      await Promise.all([
-        clients.length === 0 ? api.get<{ clients: Client[] }>('/clients', token).then((r) => setClients(r.clients)).catch(() => {}) : Promise.resolve(),
-        users.length === 0 ? api.get<{ users: User[] }>('/users', token).then((r) => setUsers(r.users)).catch(() => {}) : Promise.resolve(),
-      ]);
-    }
+    setShowAddOC(false);
+    setNewOC({ name: '', firm: '', phone: '', email: '' });
+    await Promise.all([
+      clients.length === 0 ? api.get<{ clients: Client[] }>('/clients', token).then((r) => setClients(r.clients)).catch(() => {}) : Promise.resolve(),
+      users.length === 0 ? api.get<{ users: User[] }>('/users', token).then((r) => setUsers(r.users)).catch(() => {}) : Promise.resolve(),
+      api.get<{ opposing_counsels: OpposingCounsel[] }>('/opposing-counsels', token).then((r) => setOpposingCounsels(r.opposing_counsels)).catch(() => {}),
+    ]);
     setShowEditModal(true);
   };
 
@@ -295,6 +318,7 @@ export default function CaseDetailPage() {
         case_number: editForm.case_number || null,
         assigned_to: editForm.assigned_to || null,
         court: editForm.court || null,
+        opposing_counsel_id: editForm.opposing_counsel_id || null,
         filed_date: editForm.filed_date || null,
         closed_date: editForm.closed_date || null,
         outcome: editForm.outcome || null,
@@ -313,6 +337,23 @@ export default function CaseDetailPage() {
       setEditSaveStatus('error');
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const saveOpposingCounsel = async (onSaved: (id: string) => void) => {
+    if (!token || !newOC.name.trim()) return;
+    setSavingOC(true);
+    try {
+      const res = await api.post<{ opposing_counsel: OpposingCounsel }>('/opposing-counsels', newOC, token);
+      const created = res.opposing_counsel;
+      setOpposingCounsels((prev) => [...prev, created]);
+      setShowAddOC(false);
+      setNewOC({ name: '', firm: '', phone: '', email: '' });
+      onSaved(String(created.id));
+    } catch {
+      showToast('Failed to save opposing counsel', 'error');
+    } finally {
+      setSavingOC(false);
     }
   };
 
@@ -394,6 +435,38 @@ export default function CaseDetailPage() {
               <p className="text-sm mt-0.5">{caseItem.court || '-'}</p>
             </div>
           </div>
+          {caseItem.opposing_counsel && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Opposing Counsel</p>
+              <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
+                <p className="text-sm font-semibold">{caseItem.opposing_counsel.name}</p>
+                {caseItem.opposing_counsel.firm && (
+                  <p className="text-xs text-muted flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                    {caseItem.opposing_counsel.firm}
+                  </p>
+                )}
+                {caseItem.opposing_counsel.phone && (
+                  <p className="text-xs text-muted flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                    {caseItem.opposing_counsel.phone}
+                  </p>
+                )}
+                {caseItem.opposing_counsel.email && (
+                  <p className="text-xs text-muted flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    <a href={`mailto:${caseItem.opposing_counsel.email}`} className="hover:text-primary transition-colors">{caseItem.opposing_counsel.email}</a>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          {!caseItem.opposing_counsel && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-1">Opposing Counsel</p>
+              <p className="text-sm text-muted">-</p>
+            </div>
+          )}
           {caseItem.description && (
             <div className="mt-4 pt-4 border-t border-border">
               <p className="text-xs text-muted font-medium uppercase tracking-wider mb-1">Parties</p>
@@ -671,6 +744,53 @@ export default function CaseDetailPage() {
               </div>
 
               <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium">Opposing Counsel</label>
+                  {!showAddOC && (
+                    <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+                  )}
+                </div>
+                <SearchableSelect
+                  value={editForm.opposing_counsel_id}
+                  onChange={(v) => setEditForm({ ...editForm, opposing_counsel_id: v })}
+                  options={[
+                    { value: '', label: 'Select opposing counsel' },
+                    ...opposingCounsels.map((oc) => ({ value: String(oc.id), label: oc.firm || oc.name })),
+                  ]}
+                  placeholder="Search opposing counsel..."
+                />
+                {showAddOC && (
+                  <div className="mt-3 p-4 bg-gray-50 border border-border rounded-xl space-y-3">
+                    <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Name *</label>
+                        <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Firm</label>
+                        <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Phone</label>
+                        <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Email</label>
+                        <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
+                      <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setEditForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                        {savingOC ? 'Saving...' : 'Save & Select'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium mb-1">Parties</label>
                 <textarea value={editForm.parties} onChange={(e) => setEditForm({ ...editForm, parties: e.target.value })} rows={3} className={inputClass} placeholder="List the parties involved" />
               </div>
@@ -726,34 +846,6 @@ export default function CaseDetailPage() {
                 <label className="block text-sm font-medium mb-1">Filed Date</label>
                 <input type="date" value={editForm.filed_date} onChange={(e) => setEditForm({ ...editForm, filed_date: e.target.value })} className={inputClass} />
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Status</label>
-                  <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })} className={inputClass}>
-                    {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Priority</label>
-                  <select value={editForm.priority} onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })} className={inputClass}>
-                    {priorities.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {editForm.status === 'Closed' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Closed Date</label>
-                    <input type="date" value={editForm.closed_date} onChange={(e) => setEditForm({ ...editForm, closed_date: e.target.value })} className={inputClass} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Outcome</label>
-                    <textarea value={editForm.outcome} onChange={(e) => setEditForm({ ...editForm, outcome: e.target.value })} rows={2} className={inputClass} placeholder="Describe the case outcome" />
-                  </div>
-                </>
-              )}
 
               <div className="flex justify-end gap-3 pt-4 border-t border-border">
                 <button type="button" onClick={() => setShowEditModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>

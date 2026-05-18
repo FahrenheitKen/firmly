@@ -117,7 +117,6 @@ export default function ClientsPage() {
 
   const editClient = (c: Client) => {
     setOpenDropdown(null);
-    console.log('Edit client:', c);
     // TODO: Implement edit client
   };
 
