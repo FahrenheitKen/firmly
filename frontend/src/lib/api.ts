@@ -39,8 +39,12 @@ async function apiFetch<T = unknown>(endpoint: string, options: FetchOptions = {
     }
   }
 
+  const isUpload = rest.body instanceof FormData;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  // Uploads can legitimately take a while — only enforce a timeout on JSON requests.
+  const timeoutId = isUpload
+    ? null
+    : setTimeout(() => controller.abort(new DOMException('Request timed out after 30s', 'TimeoutError')), 30000);
 
   try {
     const res = await fetch(`${API_URL}${endpoint}`, {
@@ -57,7 +61,7 @@ async function apiFetch<T = unknown>(endpoint: string, options: FetchOptions = {
     if (res.status === 204) return {} as T;
     return res.json();
   } finally {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 

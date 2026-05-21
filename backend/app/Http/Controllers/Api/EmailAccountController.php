@@ -214,6 +214,10 @@ class EmailAccountController extends Controller
      */
     public function getOAuthSettings(Request $request): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('business_settings.access')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $business = Business::find($request->user()->business_id);
         $settings = $business?->email_settings ?? [];
 
@@ -235,6 +239,10 @@ class EmailAccountController extends Controller
      */
     public function saveOAuthSettings(Request $request, string $provider): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('business_settings.access')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         if (!isset($this->providers[$provider])) {
             return response()->json(['error' => 'Invalid provider'], 422);
         }
@@ -271,6 +279,10 @@ class EmailAccountController extends Controller
      */
     public function deleteOAuthSettings(Request $request, string $provider): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('business_settings.access')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         if (!isset($this->providers[$provider])) {
             return response()->json(['error' => 'Invalid provider'], 422);
         }

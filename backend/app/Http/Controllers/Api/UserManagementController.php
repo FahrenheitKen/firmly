@@ -26,10 +26,17 @@ class UserManagementController extends Controller
                       ->orWhereHas('permissions', fn($p) => $p->where('name', "location.{$activeLocationId}"));
                 });
             })
-            ->paginate(20);
+            ->paginate(min((int) $request->query('per_page', 20), 500));
+
+        $items = collect($users->items())->map(function (User $u) {
+            $data = $u->toArray();
+            $data['full_name'] = $u->user_full_name;
+            $data['role'] = $u->role_name;
+            return $data;
+        });
 
         return response()->json([
-            'users' => $users->items(),
+            'users' => $items,
             'pagination' => [
                 'current_page' => $users->currentPage(),
                 'last_page' => $users->lastPage(),
@@ -42,7 +49,7 @@ class UserManagementController extends Controller
     private function canManageUsers(Request $request): bool
     {
         $user = $request->user();
-        return $user->isOwner() || $user->hasPermissionTo('user.create');
+        return $user->isOwner() || $user->hasPermissionSafe('user.create');
     }
 
     private function isAdminOrOwner(Request $request): bool
@@ -55,7 +62,7 @@ class UserManagementController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (!$request->user()->isOwner() && !$request->user()->hasPermissionTo('user.create')) {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('user.create')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -135,6 +142,9 @@ class UserManagementController extends Controller
         } catch (\Spatie\Permission\Exceptions\RoleDoesNotExist $e) {
             return response()->json(['message' => 'Role not found.'], 404);
         }
+        if (!str_ends_with($role->name, "#{$businessId}")) {
+            return response()->json(['message' => 'Role does not belong to this business.'], 403);
+        }
         $user->assignRole($role);
 
         if (!empty($locationPerms)) {
@@ -158,9 +168,15 @@ class UserManagementController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('user.view')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $user = User::where('business_id', $request->user()->business_id)
             ->with(['roles.permissions'])
             ->findOrFail($id);
+
+        $user->makeVisible('bank_details');
 
         $locationPermissions = $user->permissions
             ->filter(fn($p) => str_starts_with($p->name, 'location.'))
@@ -176,7 +192,7 @@ class UserManagementController extends Controller
 
     public function update(Request $request, int $id): JsonResponse
     {
-        if (!$request->user()->isOwner() && !$request->user()->hasPermissionTo('user.update')) {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('user.update')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -234,6 +250,9 @@ class UserManagementController extends Controller
             } catch (\Spatie\Permission\Exceptions\RoleDoesNotExist $e) {
                 return response()->json(['message' => 'Role not found.'], 404);
             }
+            if (!str_ends_with($role->name, "#{$request->user()->business_id}")) {
+                return response()->json(['message' => 'Role does not belong to this business.'], 403);
+            }
             $user->syncRoles([$role]);
         }
 
@@ -254,12 +273,12 @@ class UserManagementController extends Controller
             $user->update(['active_location_id' => !empty($validLocations) ? $validLocations[0] : null]);
         }
 
-        return response()->json(['user' => $user->fresh(['roles.permissions'])]);
+        return response()->json(['user' => $user->fresh(['roles.permissions'])->makeVisible('bank_details')]);
     }
 
     public function destroy(Request $request, int $id): JsonResponse
     {
-        if (!$request->user()->isOwner() && !$request->user()->hasPermissionTo('user.delete')) {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('user.delete')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -286,6 +305,11 @@ class UserManagementController extends Controller
         $isAdmin = $request->user()->isOwner() || $request->user()->roles->contains(fn($r) => $r->name === "Admin#{$businessId}");
         if (!$isAdmin) {
             return response()->json(['message' => 'Only admins can reset passwords.'], 403);
+        }
+
+        $business = $user->business;
+        if ($business && $business->owner_id === $user->id && !$request->user()->isOwner()) {
+            return response()->json(['message' => 'Only the business owner can change the owner password.'], 403);
         }
 
         $request->validate([
@@ -324,12 +348,15 @@ class UserManagementController extends Controller
     private function allowedPermissions(): array
     {
         return [
-            'business_settings.access', 'user.view', 'user.create', 'user.update', 'user.delete',
-            'invoice_settings.access', 'location.access',
+            'business_settings.access',
+            'business_settings.general', 'business_settings.firm_branches', 'business_settings.case_settings',
+            'user.view', 'user.create', 'user.update', 'user.delete',
+            'case.view_own', 'case.view_all', 'case.create', 'case.update', 'case.delete',
+            'client.create', 'client.update', 'client.delete',
+            'task.view_own', 'task.view_all', 'task.create', 'task.update', 'task.delete',
             'product.view', 'product.create', 'product.update', 'product.delete',
             'purchase.view', 'purchase.create', 'purchase.update', 'purchase.delete',
             'sell.view', 'sell.create', 'sell.update', 'sell.delete',
-            'expense.access', 'account.access', 'report.view', 'dashboard.data',
         ];
     }
 
@@ -344,7 +371,7 @@ class UserManagementController extends Controller
 
     public function createRole(Request $request): JsonResponse
     {
-        if (!$request->user()->isOwner() && !$request->user()->hasPermissionTo('business_settings.access')) {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('business_settings.access')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -384,7 +411,7 @@ class UserManagementController extends Controller
 
     public function updateRole(Request $request, int $id): JsonResponse
     {
-        if (!$request->user()->isOwner() && !$request->user()->hasPermissionTo('business_settings.access')) {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('business_settings.access')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -424,7 +451,7 @@ class UserManagementController extends Controller
 
     public function deleteRole(Request $request, int $id): JsonResponse
     {
-        if (!$request->user()->isOwner() && !$request->user()->hasPermissionTo('business_settings.access')) {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('business_settings.access')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -453,16 +480,14 @@ class UserManagementController extends Controller
         return response()->json([
             'permissions' => [
                 'business_settings.access',
+                'business_settings.general', 'business_settings.firm_branches', 'business_settings.case_settings',
                 'user.view', 'user.create', 'user.update', 'user.delete',
-                'invoice_settings.access',
-                'location.access',
+                'case.view_own', 'case.view_all', 'case.create', 'case.update', 'case.delete',
+            'client.create', 'client.update', 'client.delete',
+                'task.view_own', 'task.view_all', 'task.create', 'task.update', 'task.delete',
                 'product.view', 'product.create', 'product.update', 'product.delete',
                 'purchase.view', 'purchase.create', 'purchase.update', 'purchase.delete',
                 'sell.view', 'sell.create', 'sell.update', 'sell.delete',
-                'expense.access',
-                'account.access',
-                'report.view',
-                'dashboard.data',
             ],
         ]);
     }

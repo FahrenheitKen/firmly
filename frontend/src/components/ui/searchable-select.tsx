@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Option {
   value: string;
@@ -13,20 +14,35 @@ interface Props {
   onChange: (value: string) => void;
   options: Option[];
   placeholder?: string;
+  dropUp?: boolean;
 }
 
-export default function SearchableSelect({ label, value, onChange, options, placeholder = 'Search...' }: Props) {
+export default function SearchableSelect({ label, value, onChange, options, placeholder = 'Search...', dropUp = false }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState({ top: 0, bottom: 0, left: 0, width: 0 });
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        wrapperRef.current && !wrapperRef.current.contains(target) &&
+        popoverRef.current && !popoverRef.current.contains(target)
+      ) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  useEffect(() => {
+    if (open && buttonRef.current) {
+      const r = buttonRef.current.getBoundingClientRect();
+      setRect({ top: r.top, bottom: r.bottom, left: r.left, width: r.width });
+    }
+  }, [open]);
 
   const filtered = options.filter((o) =>
     o.label.toLowerCase().includes(search.toLowerCase())
@@ -35,10 +51,13 @@ export default function SearchableSelect({ label, value, onChange, options, plac
   const selected = options.find((o) => o.value === value);
   const displayLabel = value ? (selected?.label || value) : placeholder;
 
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
+
   return (
-    <div ref={ref} className="relative">
+    <div ref={wrapperRef} className="relative">
       {label && <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-1.5">{label}</label>}
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => { setOpen(!open); setSearch(''); }}
         className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-card-bg border border-border rounded-xl hover:border-primary/50 focus:outline-none focus:border-primary transition-colors text-sm text-left"
@@ -49,8 +68,19 @@ export default function SearchableSelect({ label, value, onChange, options, plac
         </svg>
       </button>
 
-      {open && (
-        <div className="absolute top-full mt-1 left-0 right-0 bg-card-bg border border-border rounded-xl shadow-lg z-20 overflow-hidden">
+      {open && createPortal(
+        <div
+          ref={popoverRef}
+          style={{
+            position: 'fixed',
+            ...(dropUp
+              ? { bottom: `${viewportHeight - rect.top + 6}px` }
+              : { top: `${rect.bottom + 6}px` }),
+            left: `${rect.left}px`,
+            width: `${rect.width}px`,
+          }}
+          className="bg-card-bg border border-border rounded-xl shadow-lg z-[100] overflow-hidden"
+        >
           <div className="p-2 border-b border-border/50">
             <div className="relative">
               <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -85,7 +115,8 @@ export default function SearchableSelect({ label, value, onChange, options, plac
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

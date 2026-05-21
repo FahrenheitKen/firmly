@@ -11,7 +11,8 @@ class UserProfileController extends Controller
 {
     public function show(Request $request): JsonResponse
     {
-        return response()->json(['user' => $request->user()->load('business')]);
+        $user = $request->user()->makeVisible('bank_details');
+        return response()->json(['user' => $user->load('business')]);
     }
 
     public function update(Request $request): JsonResponse
@@ -57,7 +58,7 @@ class UserProfileController extends Controller
         unset($validated['current_password']);
         $user->update($validated);
 
-        return response()->json(['user' => $user->fresh()]);
+        return response()->json(['user' => $user->fresh()->makeVisible('bank_details')]);
     }
 
     public function updatePassword(Request $request): JsonResponse

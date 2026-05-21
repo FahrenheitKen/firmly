@@ -26,7 +26,7 @@ class ClientController extends Controller
                   ->orWhere('client_id', 'like', "%{$s}%");
             }))
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate(min((int) $request->query('per_page', 20), 500));
 
         return response()->json([
             'clients' => $clients->items(),
@@ -41,6 +41,10 @@ class ClientController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('client.create')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $businessId = $request->user()->business_id;
         $locationId = $request->user()->active_location_id;
 
@@ -115,6 +119,10 @@ class ClientController extends Controller
 
     public function update(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('client.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $client = Client::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
@@ -147,6 +155,10 @@ class ClientController extends Controller
 
     public function destroy(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('client.delete')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $client = Client::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
@@ -157,6 +169,10 @@ class ClientController extends Controller
 
     public function toggleActive(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('client.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $client = Client::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);

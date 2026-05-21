@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import SearchableSelect from '@/components/ui/searchable-select';
+import DatePicker from '@/components/ui/date-picker';
 
 interface CaseItem {
   id: number;
@@ -79,8 +80,8 @@ export default function EditCasePage() {
     if (!token) return;
     Promise.all([
       api.get<{ case: CaseItem }>(`/cases/${params.id}`, token),
-      api.get<{ clients: Client[] }>('/clients', token),
-      api.get<{ users: User[] }>('/users', token),
+      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
+      api.get<{ users: User[] }>('/users?per_page=500', token),
     ]).then(([caseRes, clientRes, userRes]) => {
       const c = caseRes.case;
       setForm({
@@ -253,7 +254,7 @@ export default function EditCasePage() {
           {/* Filed Date */}
           <div>
             <label className="block text-sm font-medium mb-1">Filed Date</label>
-            <input type="date" value={form.filed_date} onChange={(e) => setForm({ ...form, filed_date: e.target.value })} className={inputClass} />
+            <DatePicker value={form.filed_date} onChange={(v) => setForm({ ...form, filed_date: v })} />
           </div>
 
           {/* Status + Priority */}
@@ -283,7 +284,7 @@ export default function EditCasePage() {
             <>
               <div>
                 <label className="block text-sm font-medium mb-1">Closed Date</label>
-                <input type="date" value={form.closed_date} onChange={(e) => setForm({ ...form, closed_date: e.target.value })} className={inputClass} />
+                <DatePicker value={form.closed_date} onChange={(v) => setForm({ ...form, closed_date: v })} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Outcome</label>

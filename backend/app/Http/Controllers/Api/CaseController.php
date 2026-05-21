@@ -7,6 +7,9 @@ use App\Models\Business;
 use App\Models\Cases;
 use App\Models\CaseDocument;
 use App\Models\Client;
+use App\Models\User;
+use App\Notifications\CaseAssignedNotification;
+use App\Services\TenantDocumentStorage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,11 +18,17 @@ class CaseController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $businessId = $request->user()->business_id;
-        $activeLocationId = $request->user()->active_location_id;
+        $user = $request->user();
+        if (!$user->canViewAnyCase()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $businessId = $user->business_id;
+        $activeLocationId = $user->active_location_id;
 
         $cases = Cases::where('business_id', $businessId)
             ->where('location_id', $activeLocationId)
+            ->when($user->restrictedToOwnCases(), fn($q) => $q->where('assigned_to', $user->id))
             ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'opposingCounsel:id,name,firm'])
             ->when($request->client_id, fn($q, $cid) => $q->where('client_id', $cid))
             ->when($request->search, fn($q, $s) => $q->where(function ($q) use ($s) {
@@ -29,7 +38,7 @@ class CaseController extends Controller
                   ->orWhere('status', 'like', "%{$s}%");
             }))
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate(min((int) $request->query('per_page', 20), 500));
 
         return response()->json([
             'cases' => $cases->items(),
@@ -68,6 +77,10 @@ class CaseController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.create')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $businessId = $request->user()->business_id;
 
         if ($request->has('is_recovery')) {
@@ -93,59 +106,35 @@ class CaseController extends Controller
         $validated['created_by'] = $request->user()->id;
         $validated['location_id'] = $request->user()->active_location_id;
 
-        if (empty($validated['case_number'])) {
-            $business = Business::findOrFail($businessId);
-            $refPrefixes = $business->ref_no_prefixes ?? [];
-            $format = $refPrefixes['case_number_format'] ?? '{FI}/{CP}/{CT}/{N}/{Y}';
-
-            $firmInitials = $this->getInitials($business->name);
-
-            $clientPrefix = '';
-            if (!empty($validated['client_id'])) {
-                $client = Client::find($validated['client_id']);
-                if ($client) {
-                    if ($client->business_name) {
-                        $clientPrefix = $client->client_prefix ?: $this->getInitials($client->business_name);
-                    } else {
-                        $firstInitial = strtoupper(substr($client->first_name ?? '', 0, 1));
-                        $lastInitial  = strtoupper(substr($client->last_name  ?? '', 0, 1));
-                        $clientPrefix = $client->client_prefix ?: ($firstInitial . $lastInitial);
-                    }
-                }
-            }
-
-            $location = \App\Models\BusinessLocation::find($request->user()->active_location_id);
-            $cityAbbrev = $this->getCityAbbreviation($location?->city);
-
-            $business->increment('case_counter');
-            $seq = str_pad($business->case_counter, 3, '0', STR_PAD_LEFT);
-            $year = now()->format('Y');
-
-            $replacements = [
-                '{FI}' => $firmInitials,
-                '{BI}' => $businessId,
-                '{CP}' => $clientPrefix,
-                '{CT}' => $cityAbbrev,
-                '{N}' => $seq,
-                '{Y}' => $year,
-            ];
-            $validated['case_number'] = str_replace(array_keys($replacements), array_values($replacements), $format);
-        }
-
         $case = Cases::create($validated);
 
+        // Notify the assignee (skip self-assignment).
+        if ($case->assigned_to && $case->assigned_to !== $request->user()->id) {
+            $assignee = User::find($case->assigned_to);
+            if ($assignee) {
+                $assignee->notify(new CaseAssignedNotification($case, $request->user()));
+            }
+        }
+
         if ($request->hasFile('documents')) {
+            $storage = app(TenantDocumentStorage::class);
+            $business = Business::findOrFail($businessId);
             foreach ($request->file('documents') as $file) {
-                $path = $file->store("case-documents/{$case->id}", 'local');
+                $info = $storage->upload($business, $case->id, $file);
                 $safeName = preg_replace('/[\r\n\x00-\x1F\x7F]/', '', basename($file->getClientOriginalName()));
                 CaseDocument::create([
-                    'case_id' => $case->id,
-                    'business_id' => $businessId,
-                    'original_name' => $safeName,
-                    'file_path' => $path,
-                    'file_size' => $file->getSize(),
-                    'mime_type' => mime_content_type($file->getRealPath()) ?: 'application/octet-stream',
-                    'uploaded_by' => $request->user()->id,
+                    'case_id'         => $case->id,
+                    'business_id'     => $businessId,
+                    'original_name'   => $safeName,
+                    'file_path'       => $info['file_path'],
+                    'disk'            => $info['disk'],
+                    'storage_key'     => $info['storage_key'],
+                    'kms_key_id'      => $info['kms_key_id'],
+                    'etag'            => $info['etag'],
+                    'checksum_sha256' => $info['checksum_sha256'],
+                    'file_size'       => $info['file_size'],
+                    'mime_type'       => $info['mime_type'],
+                    'uploaded_by'     => $request->user()->id,
                 ]);
             }
         }
@@ -159,14 +148,27 @@ class CaseController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel'])
             ->findOrFail($id);
+
+        if (!$request->user()->canViewCase($case->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         return response()->json(['case' => $case]);
     }
 
     public function update(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
+
+        if (!$request->user()->canViewCase($case->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         if ($request->has('is_recovery')) {
             $request->merge(['is_recovery' => filter_var($request->is_recovery, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)]);
@@ -195,16 +197,37 @@ class CaseController extends Controller
             $validated['closed_date'] = now();
         }
 
+        $previousAssignee = $case->assigned_to;
         $case->update($validated);
+
+        if (array_key_exists('assigned_to', $validated)
+            && $case->assigned_to
+            && $case->assigned_to !== $previousAssignee
+            && $case->assigned_to !== $request->user()->id
+        ) {
+            $assignee = User::find($case->assigned_to);
+            if ($assignee) {
+                $assignee->notify(new CaseAssignedNotification($case, $request->user()));
+            }
+        }
 
         return response()->json(['case' => $case->fresh()->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm'])]);
     }
 
     public function destroy(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.delete')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
+
+        if (!$request->user()->canViewCase($case->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $case->delete();
 
         return response()->json(['message' => 'Case deleted']);
@@ -212,9 +235,17 @@ class CaseController extends Controller
 
     public function toggleStatus(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
+
+        if (!$request->user()->canViewCase($case->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         $validated = $request->validate([
             'status' => 'required|in:Open,In Progress,Closed,On Hold',

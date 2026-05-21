@@ -11,6 +11,14 @@ use Spatie\Permission\Models\Permission;
 
 class BusinessLocationController extends Controller
 {
+    private function canManageBranches(Request $request): bool
+    {
+        $u = $request->user();
+        return $u->isOwner()
+            || $u->hasPermissionSafe('business_settings.access')
+            || $u->hasPermissionSafe('business_settings.firm_branches');
+    }
+
     public function index(Request $request): JsonResponse
     {
         $businessId = $request->user()->business_id;
@@ -28,6 +36,10 @@ class BusinessLocationController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if (!$this->canManageBranches($request)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $businessId = $request->user()->business_id;
 
         $validated = $request->validate([
@@ -78,6 +90,10 @@ class BusinessLocationController extends Controller
 
     public function update(Request $request, int $id): JsonResponse
     {
+        if (!$this->canManageBranches($request)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $businessId = $request->user()->business_id;
         $location = BusinessLocation::where('business_id', $businessId)->findOrFail($id);
 
@@ -114,6 +130,10 @@ class BusinessLocationController extends Controller
 
     public function destroy(Request $request, int $id): JsonResponse
     {
+        if (!$this->canManageBranches($request)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $location = BusinessLocation::where('business_id', $request->user()->business_id)->findOrFail($id);
         $location->delete();
         return response()->json(['message' => 'Location deleted']);
@@ -121,6 +141,10 @@ class BusinessLocationController extends Controller
 
     public function toggleActive(Request $request, int $id): JsonResponse
     {
+        if (!$this->canManageBranches($request)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $location = BusinessLocation::where('business_id', $request->user()->business_id)->findOrFail($id);
         $location->update(['is_active' => DB::raw('NOT is_active')]);
         $location->refresh();

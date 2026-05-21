@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { useLocations } from '@/lib/locations-context';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import DatePicker from '@/components/ui/date-picker';
@@ -12,12 +13,6 @@ interface Role {
   id: number;
   name: string;
   full_name: string;
-}
-
-interface Location {
-  id: number;
-  name: string;
-  city: string;
 }
 
 const Input = ({ label, required, ...props }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) => (
@@ -61,16 +56,15 @@ const CheckCard = ({ checked, onChange, label, description }: { checked: boolean
 
 export default function CreateUserPage() {
   const { token } = useAuth();
+  const { locations } = useLocations();
   const router = useRouter();
   const [roles, setRoles] = useState<Role[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<Record<string, unknown>>({
     surname: '', first_name: '', last_name: '', email: '',
     password: '', role_id: '', allow_login: true, contact_no: '',
     dob: '', gender: '', marital_status: '', blood_group: '',
-    language: 'en', is_cmmsn_agnt: false, cmmsn_percent: 0,
-    max_sales_discount_percent: '', location_permissions: [] as number[],
+    language: 'en', max_sales_discount_percent: '', location_permissions: [] as number[],
     account_holder_name: '', account_number: '', bank_name: '',
     bank_identification_code: '', branch: '', tax_payer_id: '',
     basic_salary: '',
@@ -81,14 +75,9 @@ export default function CreateUserPage() {
 
   useEffect(() => {
     if (!token) return;
-    Promise.all([
-      api.get<{ roles: Role[] }>('/roles', token),
-      api.get<{ locations: Location[] }>('/locations', token),
-    ]).then(([rolesRes, locsRes]) => {
-      setRoles(rolesRes.roles);
-      setLocations(locsRes.locations);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    api.get<{ roles: Role[] }>('/roles', token)
+      .then((rolesRes) => setRoles(rolesRes.roles))
+      .finally(() => setLoading(false));
   }, [token]);
 
   const toggleLocation = (locId: number) => {

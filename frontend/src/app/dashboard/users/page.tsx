@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { useLocations } from '@/lib/locations-context';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
+import DatePicker from '@/components/ui/date-picker';
 import ConfirmDialog from '@/components/ui/confirm-dialog';
 import { useToast } from '@/lib/toast-context';
 
@@ -19,7 +21,6 @@ interface UserItem {
   role: string;
   allow_login: boolean;
   contact_no: string | null;
-  business_id: number;
 }
 
 interface Role {
@@ -28,18 +29,12 @@ interface Role {
   full_name: string;
 }
 
-interface Location {
-  id: number;
-  name: string;
-  city: string;
-}
-
 export default function UsersPage() {
   const { token, user } = useAuth();
+  const { locations } = useLocations();
   const { toast } = useToast();
   const [users, setUsers] = useState<UserItem[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -62,14 +57,12 @@ export default function UsersPage() {
   const fetchData = async () => {
     if (!token) return;
     try {
-      const [usersRes, rolesRes, locsRes] = await Promise.all([
+      const [usersRes, rolesRes] = await Promise.all([
         api.get<{ users: UserItem[] }>('/users', token),
         api.get<{ roles: Role[] }>('/roles', token),
-        api.get<{ locations: Location[] }>('/locations', token),
       ]);
       setUsers(usersRes.users);
       setRoles(rolesRes.roles);
-      setLocations(locsRes.locations);
     } catch (err: unknown) {
       const e = err as { message?: string };
       setError(e.message || 'Failed to load users data');
@@ -90,7 +83,6 @@ export default function UsersPage() {
         email: u.email || '', allow_login: u.allow_login, contact_no: u.contact_no || '',
         dob: u.dob || '', gender: u.gender || '', marital_status: u.marital_status || '',
         blood_group: u.blood_group || '', language: u.language || 'en',
-        is_cmmsn_agnt: u.is_cmmsn_agnt, cmmsn_percent: u.cmmsn_percent || 0,
         max_sales_discount_percent: u.max_sales_discount_percent || '',
         role_id: (u.roles as Array<{ id: number }>)?.[0]?.id || '',
         location_permissions: res.location_permissions,
@@ -161,10 +153,9 @@ export default function UsersPage() {
             <thead>
               <tr className="border-b border-border bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium">Name</th>
-                <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Email</th>
+                <th className="text-left px-4 py-3 font-medium">Email</th>
                 <th className="text-left px-4 py-3 font-medium">Role</th>
-                <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Status</th>
-                <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Business ID</th>
+                <th className="text-left px-4 py-3 font-medium">Status</th>
                 <th className="text-right px-4 py-3 font-medium">Actions</th>
               </tr>
             </thead>
@@ -173,18 +164,16 @@ export default function UsersPage() {
                 <tr key={u.id} className="border-b border-border last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="font-medium">{u.full_name}</div>
-                    <div className="text-xs text-muted sm:hidden">{u.email || '-'}</div>
                   </td>
-                  <td className="px-4 py-3 hidden sm:table-cell">{u.email || '-'}</td>
+                  <td className="px-4 py-3">{u.email || '-'}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full">{u.role}</span>
                   </td>
-                  <td className="px-4 py-3 hidden sm:table-cell">
+                  <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${u.allow_login ? 'bg-green-100 text-success' : 'bg-red-100 text-danger'}`}>
                       {u.allow_login ? 'Active' : 'Disabled'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 hidden lg:table-cell text-xs font-mono text-muted">{u.business_id}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex gap-1.5 justify-end">
                       <Link href={`/dashboard/users/${u.id}`} className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 hover:border-primary/30 transition-all text-primary shadow-sm">
@@ -237,7 +226,7 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Date of Birth</label>
-                <input type="date" value={editForm.dob as string} onChange={(e) => setEditForm({ ...editForm, dob: e.target.value })} className={inputClass} />
+                <DatePicker value={editForm.dob as string} onChange={(v) => setEditForm({ ...editForm, dob: v })} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Gender</label>
@@ -270,22 +259,9 @@ export default function UsersPage() {
                   {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Language</label>
-                <select value={editForm.language as string} onChange={(e) => setEditForm({ ...editForm, language: e.target.value })} className={inputClass}>
-                  <option value="en">English</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                  <option value="ar">Arabic</option>
-                </select>
-              </div>
               <label className="flex items-center gap-2 pt-6">
                 <input type="checkbox" checked={editForm.allow_login as boolean} onChange={(e) => setEditForm({ ...editForm, allow_login: e.target.checked })} className="w-4 h-4 text-primary rounded" />
                 <span className="text-sm">Allow Login</span>
-              </label>
-              <label className="flex items-center gap-2 pt-6">
-                <input type="checkbox" checked={editForm.is_cmmsn_agnt as boolean} onChange={(e) => setEditForm({ ...editForm, is_cmmsn_agnt: e.target.checked })} className="w-4 h-4 text-primary rounded" />
-                <span className="text-sm">Commission Agent</span>
               </label>
             </div>
           </div>

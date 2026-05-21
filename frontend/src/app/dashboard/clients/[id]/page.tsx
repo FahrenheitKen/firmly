@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { useFormatDate } from '@/lib/date';
 import { api } from '@/lib/api';
 
 interface ClientCase {
@@ -15,11 +16,6 @@ interface ClientCase {
   status: string;
   filed_date: string | null;
   created_at: string;
-}
-
-function formatDate(date: string | null): string {
-  if (!date) return '-';
-  return new Date(date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 const statusColors: Record<string, string> = {
@@ -63,6 +59,7 @@ function DetailField({ label, value }: { label: string; value: string | null | u
 
 export default function ClientDetailPage() {
   const { token } = useAuth();
+  const formatDate = useFormatDate();
   const params = useParams();
   const router = useRouter();
   const [client, setClient] = useState<Client | null>(null);

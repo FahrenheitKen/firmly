@@ -19,16 +19,17 @@ class BusinessUtil
             'guard_name' => 'web',
         ]);
 
-        $cashierRole = Role::create([
-            'name' => "Cashier#{$businessId}",
+        $counselRole = Role::create([
+            'name' => "Counsel#{$businessId}",
             'guard_name' => 'web',
         ]);
 
         $defaultPermissions = [
             'business_settings.access',
+            'business_settings.general',
+            'business_settings.firm_branches',
+            'business_settings.case_settings',
             'user.view', 'user.create', 'user.update', 'user.delete',
-            'invoice_settings.access',
-            'location.access',
         ];
 
         foreach ($defaultPermissions as $perm) {

@@ -2,30 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { api } from '@/lib/api';
-
-interface Location {
-  id: number;
-  name: string;
-  city: string;
-  country: string;
-}
+import { useLocations } from '@/lib/locations-context';
 
 export default function LocationSwitcher() {
-  const { user, token, switchLocation } = useAuth();
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const { user, switchLocation } = useAuth();
+  const { locations, loading: locationsLoading } = useLocations();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!token) return;
-    api.get<{ locations: Location[] }>('/locations', token).then((r) => {
-      setLocations(r.locations);
-      setLoaded(true);
-    });
-  }, [token]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -35,10 +19,13 @@ export default function LocationSwitcher() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  if (!loaded) return <div className="h-14" />;
-  if (locations.length <= 1) return null;
-
   const active = user?.active_location;
+
+  // Hide entirely if the user has 0 or 1 location, but only once we've actually
+  // resolved the list. While loading, keep showing the active location pill so
+  // the sidebar doesn't visibly collapse.
+  if (!active) return null;
+  if (!locationsLoading && locations.length <= 1) return null;
 
   const handleSwitch = async (id: number) => {
     if (id === active?.id) { setOpen(false); return; }

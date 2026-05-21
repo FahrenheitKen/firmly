@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { useLocations } from '@/lib/locations-context';
 import { api } from '@/lib/api';
 import DatePicker from '@/components/ui/date-picker';
 
@@ -11,12 +12,6 @@ interface Role {
   id: number;
   name: string;
   full_name: string;
-}
-
-interface Location {
-  id: number;
-  name: string;
-  city: string;
 }
 
 const Input = ({ label, required, ...props }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) => (
@@ -60,10 +55,10 @@ const CheckCard = ({ checked, onChange, label, description }: { checked: boolean
 
 export default function EditUserPage() {
   const { token } = useAuth();
+  const { locations } = useLocations();
   const router = useRouter();
   const params = useParams();
   const [roles, setRoles] = useState<Role[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -73,11 +68,9 @@ export default function EditUserPage() {
     if (!token) return;
     Promise.all([
       api.get<{ roles: Role[] }>('/roles', token),
-      api.get<{ locations: Location[] }>('/locations', token),
       api.get<{ user: Record<string, unknown>; location_permissions: number[]; has_all_locations: boolean }>(`/users/${params.id}`, token),
-    ]).then(([rolesRes, locsRes, userRes]) => {
+    ]).then(([rolesRes, userRes]) => {
       setRoles(rolesRes.roles);
-      setLocations(locsRes.locations);
       const u = userRes.user;
       const bank = (u.bank_details as Record<string, unknown>) || {};
       setForm({

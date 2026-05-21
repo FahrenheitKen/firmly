@@ -22,6 +22,8 @@ interface User {
   business?: {
     id: number;
     name: string;
+    owner_id?: number;
+    date_format?: string;
   };
   roles?: Array<{ id: number; name: string; permissions: Array<{ name: string }> }>;
 }
@@ -34,6 +36,8 @@ interface AuthContextType {
   logout: () => void;
   loading: boolean;
   switchLocation: (locationId: number) => Promise<void>;
+  can: (permission: string) => boolean;
+  isOwner: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -120,8 +124,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [token, logout]);
 
+  const isOwner = !!user && !!user.business?.owner_id && user.business.owner_id === user.id;
+
+  const can = useCallback((permission: string): boolean => {
+    if (!user) return false;
+    if (user.business?.owner_id === user.id) return true;
+    return user.roles?.some((role) =>
+      role.permissions?.some((p) => p.name === permission)
+    ) ?? false;
+  }, [user]);
+
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, loading, switchLocation }}>
+    <AuthContext.Provider value={{ user, token, login, register, logout, loading, switchLocation, can, isOwner }}>
       {children}
     </AuthContext.Provider>
   );

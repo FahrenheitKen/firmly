@@ -68,7 +68,10 @@ const statusColors: Record<string, string> = {
 };
 
 export default function CasesPage() {
-  const { token, user } = useAuth();
+  const { token, user, can } = useAuth();
+  const canCreate = can('case.create');
+  const canUpdate = can('case.update');
+  const canDelete = can('case.delete');
   const router = useRouter();
   const { toast: showToast } = useToast();
   const [cases, setCases] = useState<CaseItem[]>([]);
@@ -116,6 +119,7 @@ export default function CasesPage() {
     filed_date: string;
     is_recovery: boolean | null;
     case_type: string;
+    is_filed_in_court: boolean;
     opposing_counsel_id: string;
   }>({
     title: '',
@@ -129,6 +133,7 @@ export default function CasesPage() {
     filed_date: '',
     is_recovery: null,
     case_type: 'Plaintiff',
+    is_filed_in_court: false,
     opposing_counsel_id: '',
   });
 
@@ -198,7 +203,7 @@ export default function CasesPage() {
   };
 
   const openCreate = () => {
-    setForm({ title: '', client_id: '', client_reference: '', parties: '', our_reference: '', case_number: '', assigned_to: '', court: '', filed_date: '', is_recovery: null, case_type: 'Plaintiff', opposing_counsel_id: '' });
+    setForm({ title: '', client_id: '', client_reference: '', parties: '', our_reference: '', case_number: '', assigned_to: '', court: '', filed_date: '', is_recovery: null, case_type: 'Plaintiff', is_filed_in_court: false, opposing_counsel_id: '' });
     setFiles([]);
     setError('');
     setStep(1);
@@ -207,8 +212,8 @@ export default function CasesPage() {
     setShowModal(true);
     if (!token) return;
     Promise.all([
-      api.get<{ clients: Client[] }>('/clients', token),
-      api.get<{ users: User[] }>('/users', token),
+      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
+      api.get<{ users: User[] }>('/users?per_page=500', token),
       api.get<{ business: Record<string, unknown> }>('/business', token),
       api.get<{ opposing_counsels: OpposingCounsel[] }>('/opposing-counsels', token).catch(() => ({ opposing_counsels: [] })),
     ]).then(([cRes, uRes, bRes, ocRes]) => {
@@ -232,19 +237,27 @@ export default function CasesPage() {
     if (!token) return;
     setSaving(true);
     setError('');
-    if (form.is_recovery === null) {
+    if (form.case_type === 'Plaintiff' && form.is_recovery === null) {
       setError('Please select if this is a recovery or not');
       setSaving(false);
       return;
     }
+    const effectiveIsRecovery = form.case_type === 'Plaintiff' ? (form.is_recovery === true) : false;
+    const effectiveCaseNumber = form.is_filed_in_court ? form.case_number : '';
+    const effectiveFiledDate = form.is_filed_in_court ? form.filed_date : '';
     try {
       const hasFiles = files.some((f) => f.size > 0 || f.name);
       if (hasFiles) {
         const fd = new FormData();
-        Object.entries(form).forEach(([k, v]) => { if (v !== null && v !== '') fd.append(k, String(v)); });
+        Object.entries(form).forEach(([k, v]) => {
+          if (k === 'is_recovery' || k === 'case_number' || k === 'filed_date' || k === 'is_filed_in_court') return;
+          if (v !== null && v !== '') fd.append(k, String(v));
+        });
         fd.set('description', form.parties);
         fd.delete('parties');
-        fd.set('is_recovery', String(form.is_recovery));
+        fd.set('is_recovery', String(effectiveIsRecovery));
+        if (effectiveCaseNumber) fd.set('case_number', effectiveCaseNumber);
+        if (effectiveFiledDate) fd.set('filed_date', effectiveFiledDate);
         files.forEach((f) => { if (f.size > 0 || f.name) fd.append('documents[]', f); });
         await api.post('/cases', fd, token);
       } else {
@@ -257,11 +270,11 @@ export default function CasesPage() {
           our_reference: form.our_reference || null,
           assigned_to: form.assigned_to || null,
           court: form.court || null,
-          filed_date: form.filed_date || null,
-          is_recovery: form.is_recovery === true ? true : false,
+          filed_date: effectiveFiledDate || null,
+          is_recovery: effectiveIsRecovery,
           case_type: form.case_type,
         };
-        if (form.case_number) payload.case_number = form.case_number;
+        if (effectiveCaseNumber) payload.case_number = effectiveCaseNumber;
         await api.post('/cases', payload, token);
       }
       setShowModal(false);
@@ -291,6 +304,7 @@ export default function CasesPage() {
     outcome: '',
     is_recovery: null as boolean | null,
     case_type: 'Plaintiff',
+    is_filed_in_court: false,
     status: 'Open',
     priority: 'Medium',
   });
@@ -315,6 +329,7 @@ export default function CasesPage() {
       outcome: caseItem.outcome || '',
       is_recovery: caseItem.is_recovery ?? null,
       case_type: caseItem.case_type || 'Plaintiff',
+      is_filed_in_court: Boolean(caseItem.case_number) || Boolean(caseItem.filed_date),
       status: caseItem.status || 'Open',
       priority: caseItem.priority || 'Medium',
     });
@@ -323,8 +338,8 @@ export default function CasesPage() {
     setShowEditModal(true);
     if (!token) return;
     Promise.all([
-      api.get<{ clients: Client[] }>('/clients', token),
-      api.get<{ users: User[] }>('/users', token),
+      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
+      api.get<{ users: User[] }>('/users?per_page=500', token),
       api.get<{ opposing_counsels: OpposingCounsel[] }>('/opposing-counsels', token).catch(() => ({ opposing_counsels: [] })),
     ]).then(([cRes, uRes, ocRes]) => {
       setClients(cRes.clients);
@@ -336,8 +351,15 @@ export default function CasesPage() {
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !editingCaseId) return;
+    if (editForm.case_type === 'Plaintiff' && editForm.is_recovery === null) {
+      setError('Please select if this is a recovery or not');
+      return;
+    }
     setSaving(true);
     setError('');
+    const effectiveIsRecovery = editForm.case_type === 'Plaintiff' ? (editForm.is_recovery === true) : false;
+    const effectiveCaseNumber = editForm.is_filed_in_court ? editForm.case_number : '';
+    const effectiveFiledDate = editForm.is_filed_in_court ? editForm.filed_date : '';
     try {
       const payload: Record<string, unknown> = {
         title: editForm.title,
@@ -348,12 +370,12 @@ export default function CasesPage() {
         court: editForm.court,
         judge: editForm.judge,
         opposing_counsel_id: editForm.opposing_counsel_id || null,
-        filed_date: editForm.filed_date || null,
+        filed_date: effectiveFiledDate || null,
         closed_date: editForm.closed_date || null,
         outcome: editForm.outcome,
-        is_recovery: editForm.is_recovery,
+        is_recovery: effectiveIsRecovery,
         case_type: editForm.case_type,
-        case_number: editForm.case_number || null,
+        case_number: effectiveCaseNumber || null,
         status: editForm.status,
         priority: editForm.priority,
       };
@@ -478,9 +500,11 @@ export default function CasesPage() {
         title="Cases"
         description="Manage firm cases"
         action={
-          <button onClick={openCreate} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
-            + Add Case
-          </button>
+          canCreate ? (
+            <button onClick={openCreate} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
+              + Add Case
+            </button>
+          ) : null
         }
       />
 
@@ -534,23 +558,33 @@ export default function CasesPage() {
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                           View
                         </button>
-                        <button onClick={() => openEdit(c)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-accent hover:bg-accent/5 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                          Edit
-                        </button>
-                        <button onClick={() => { setOpenDropdown(null); setAddFileCaseId(c.id); setAddFileForm({ document_name: '', document_date: '' }); setAddFileFile(null); setShowAddFileModal(true); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11v4m-2-2h4" /></svg>
-                          Add File
-                        </button>
-                        <button onClick={() => { setOpenDropdown(null); setEventCaseId(c.id); setEventForm({ event_type: 'Bring Up', event_date: '' }); setShowEventModal(true); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                          Add Event
-                        </button>
-                        <hr className="my-1 border-border" />
-                        <button onClick={() => deleteCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger hover:bg-danger/5 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                          Delete
-                        </button>
+                        {canUpdate && (
+                          <button onClick={() => openEdit(c)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-accent hover:bg-accent/5 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                            Edit
+                          </button>
+                        )}
+                        {canUpdate && (
+                          <button onClick={() => { setOpenDropdown(null); setAddFileCaseId(c.id); setAddFileForm({ document_name: '', document_date: '' }); setAddFileFile(null); setShowAddFileModal(true); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11v4m-2-2h4" /></svg>
+                            Add File
+                          </button>
+                        )}
+                        {canUpdate && (
+                          <button onClick={() => { setOpenDropdown(null); setEventCaseId(c.id); setEventForm({ event_type: 'Bring Up', event_date: '' }); setShowEventModal(true); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            Add Event
+                          </button>
+                        )}
+                        {canDelete && (
+                          <>
+                            <hr className="my-1 border-border" />
+                            <button onClick={() => deleteCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger hover:bg-danger/5 transition-colors">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              Delete
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </td>
@@ -627,61 +661,82 @@ export default function CasesPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
-                  <div className="flex gap-4">
-                    <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
-                        {form.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
-                        <input type="radio" name="is_recovery" checked={form.is_recovery === true} onChange={() => setForm((prev) => ({ ...prev, is_recovery: true, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, true, user?.active_location?.city) }))} className="absolute opacity-0" />
-                      </div>
-                      <span>Yes</span>
-                    </label>
-                    <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
-                        {form.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
-                        <input type="radio" name="is_recovery" checked={form.is_recovery === false} onChange={() => setForm((prev) => ({ ...prev, is_recovery: false, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) }))} className="absolute opacity-0" />
-                      </div>
-                      <span>No</span>
-                    </label>
-                  </div>
-                  {form.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
-                </div>
-                <div>
                   <label className="block text-sm font-medium mb-2">Case Type</label>
                   <div className="flex gap-4">
                     {['Plaintiff', 'Defendant'].map((type) => (
                       <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.case_type === type ? 'border-primary' : 'border-gray-300'}`}>
                           {form.case_type === type && <div className="w-2 h-2 rounded-full bg-primary" />}
-                          <input type="radio" name="case_type" checked={form.case_type === type} onChange={() => setForm((prev) => ({ ...prev, case_type: type }))} className="absolute opacity-0" />
+                          <input type="radio" name="case_type" checked={form.case_type === type} onChange={() => setForm((prev) => {
+                            const nextRecovery = type === 'Plaintiff' ? null : false;
+                            return { ...prev, case_type: type, is_recovery: nextRecovery, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) };
+                          })} className="absolute opacity-0" />
                         </div>
                         <span>{type}</span>
                       </label>
                     ))}
                   </div>
                 </div>
+
+                {form.case_type === 'Plaintiff' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
+                    <div className="flex gap-4">
+                      <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
+                          {form.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
+                          <input type="radio" name="is_recovery" checked={form.is_recovery === true} onChange={() => setForm((prev) => ({ ...prev, is_recovery: true, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, true, user?.active_location?.city) }))} className="absolute opacity-0" />
+                        </div>
+                        <span>Yes</span>
+                      </label>
+                      <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
+                          {form.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
+                          <input type="radio" name="is_recovery" checked={form.is_recovery === false} onChange={() => setForm((prev) => ({ ...prev, is_recovery: false, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) }))} className="absolute opacity-0" />
+                        </div>
+                        <span>No</span>
+                      </label>
+                    </div>
+                    {form.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Our Reference</label>
-                  <input value={form.our_reference} readOnly className={`${inputClass} bg-gray-50 cursor-not-allowed`} placeholder="Auto-generated" />
+                  <input value={form.our_reference} onChange={(e) => setForm({ ...form, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Case Number</label>
-                  <input value={form.case_number} onChange={(e) => setForm({ ...form, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Leave blank to auto-generate" />
+                  <label className="block text-sm font-medium mb-1">Station</label>
+                  <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Station</label>
-                <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={form.is_filed_in_court}
+                    onChange={(e) => setForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '' }))}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-sm font-medium">Is the case filed in court?</span>
+                </label>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1">Filed Date</label>
-                <input type="date" value={form.filed_date} onChange={(e) => setForm({ ...form, filed_date: e.target.value })} className={inputClass} />
-              </div>
+              {form.is_filed_in_court && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Case Number</label>
+                    <input value={form.case_number} onChange={(e) => setForm({ ...form, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Date Filed in Court</label>
+                    <DatePicker value={form.filed_date} onChange={(v) => setForm({ ...form, filed_date: v })} />
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4 border-t border-border">
                 <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
@@ -689,7 +744,7 @@ export default function CasesPage() {
                   type="button"
                   onClick={() => {
                     if (!form.title.trim()) { setError('Subject is required'); return; }
-                    if (form.is_recovery === null) { setError('Please select if this is a recovery or not'); return; }
+                    if (form.case_type === 'Plaintiff' && form.is_recovery === null) { setError('Please select if this is a recovery or not'); return; }
                     setError('');
                     setStep(2);
                   }}
@@ -885,60 +940,79 @@ export default function CasesPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Is this a recovery?</label>
-              <div className="flex gap-4">
-                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
-                    {editForm.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
-                    <input type="radio" name="edit_is_recovery" checked={editForm.is_recovery === true} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: true }))} className="absolute opacity-0" />
-                  </div>
-                  <span>Yes</span>
-                </label>
-                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
-                    {editForm.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
-                    <input type="radio" name="edit_is_recovery" checked={editForm.is_recovery === false} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: false }))} className="absolute opacity-0" />
-                  </div>
-                  <span>No</span>
-                </label>
-              </div>
-            </div>
-            <div>
               <label className="block text-sm font-medium mb-2">Case Type</label>
               <div className="flex gap-4">
                 {['Plaintiff', 'Defendant'].map((type) => (
                   <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
                     <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.case_type === type ? 'border-primary' : 'border-gray-300'}`}>
                       {editForm.case_type === type && <div className="w-2 h-2 rounded-full bg-primary" />}
-                      <input type="radio" name="edit_case_type" checked={editForm.case_type === type} onChange={() => setEditForm((prev) => ({ ...prev, case_type: type }))} className="absolute opacity-0" />
+                      <input type="radio" name="edit_case_type" checked={editForm.case_type === type} onChange={() => setEditForm((prev) => ({ ...prev, case_type: type, is_recovery: type === 'Plaintiff' ? prev.is_recovery : false }))} className="absolute opacity-0" />
                     </div>
                     <span>{type}</span>
                   </label>
                 ))}
               </div>
             </div>
+
+            {editForm.case_type === 'Plaintiff' && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
+                <div className="flex gap-4">
+                  <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
+                      {editForm.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
+                      <input type="radio" name="edit_is_recovery" checked={editForm.is_recovery === true} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: true }))} className="absolute opacity-0" />
+                    </div>
+                    <span>Yes</span>
+                  </label>
+                  <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
+                      {editForm.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
+                      <input type="radio" name="edit_is_recovery" checked={editForm.is_recovery === false} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: false }))} className="absolute opacity-0" />
+                    </div>
+                    <span>No</span>
+                  </label>
+                </div>
+                {editForm.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Our Reference</label>
-              <input value={editForm.our_reference} readOnly className={`${inputClass} bg-gray-50 cursor-not-allowed`} />
+              <input value={editForm.our_reference} onChange={(e) => setEditForm({ ...editForm, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Case Number</label>
-              <input value={editForm.case_number} onChange={(e) => setEditForm({ ...editForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+              <label className="block text-sm font-medium mb-1">Station</label>
+              <input value={editForm.court} onChange={(e) => setEditForm({ ...editForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Station</label>
-            <input value={editForm.court} onChange={(e) => setEditForm({ ...editForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={editForm.is_filed_in_court}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '' }))}
+                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <span className="text-sm font-medium">Is the case filed in court?</span>
+            </label>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Filed Date</label>
-            <input type="date" value={editForm.filed_date} onChange={(e) => setEditForm({ ...editForm, filed_date: e.target.value })} className={inputClass} />
-          </div>
+          {editForm.is_filed_in_court && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Case Number</label>
+                <input value={editForm.case_number} onChange={(e) => setEditForm({ ...editForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Date Filed in Court</label>
+                <DatePicker value={editForm.filed_date} onChange={(v) => setEditForm({ ...editForm, filed_date: v })} />
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <button type="button" onClick={() => { setShowEditModal(false); setEditingCaseId(null); }} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
@@ -979,11 +1053,9 @@ export default function CasesPage() {
 
           <div>
             <label className="block text-sm font-medium mb-1">Date</label>
-            <input
-              type="date"
+            <DatePicker
               value={addFileForm.document_date}
-              onChange={(e) => setAddFileForm({ ...addFileForm, document_date: e.target.value })}
-              className={inputClass}
+              onChange={(v) => setAddFileForm({ ...addFileForm, document_date: v })}
             />
           </div>
 

@@ -19,6 +19,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'bank_details',
     ];
 
     protected function casts(): array
@@ -84,6 +85,66 @@ class User extends Authenticatable
     public function canAccessLocation($locationId): bool
     {
         return in_array($locationId, $this->permittedLocations());
+    }
+
+    /**
+     * Spatie's hasPermissionTo() throws if the permission name does not yet
+     * exist in the DB. New permissions are only created on the fly when a
+     * role first uses them, so checks for not-yet-used permissions would
+     * crash without this wrapper.
+     */
+    public function hasPermissionSafe(string $permission): bool
+    {
+        try {
+            return $this->hasPermissionTo($permission);
+        } catch (\Spatie\Permission\Exceptions\PermissionDoesNotExist $e) {
+            return false;
+        }
+    }
+
+    /** Whether the user can see any cases at all (any view scope). */
+    public function canViewAnyCase(): bool
+    {
+        if ($this->isOwner()) {
+            return true;
+        }
+        return $this->hasPermissionSafe('case.view_all')
+            || $this->hasPermissionSafe('case.view_own')
+            || $this->hasPermissionSafe('case.view'); // legacy alias
+    }
+
+    /**
+     * Whether the user can see a specific case identified by its assigned_to
+     * column. Owners and view_all users see everything; view_own users see
+     * only cases assigned to them.
+     */
+    public function canViewCase(?int $assignedTo): bool
+    {
+        if ($this->isOwner()) {
+            return true;
+        }
+        if ($this->hasPermissionSafe('case.view_all') || $this->hasPermissionSafe('case.view')) {
+            return true;
+        }
+        if ($this->hasPermissionSafe('case.view_own') && $assignedTo !== null && $assignedTo === $this->id) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether the user is scoped to cases assigned to them. Used by list
+     * endpoints (cases index, calendar) to apply an assigned_to filter.
+     */
+    public function restrictedToOwnCases(): bool
+    {
+        if ($this->isOwner()) {
+            return false;
+        }
+        if ($this->hasPermissionSafe('case.view_all') || $this->hasPermissionSafe('case.view')) {
+            return false;
+        }
+        return $this->hasPermissionSafe('case.view_own');
     }
 
     public function getUserFullNameAttribute(): string

@@ -25,6 +25,10 @@ class CaseEmailController extends Controller
             ->where('business_id', $businessId)
             ->firstOrFail();
 
+        if (!$request->user()->canViewCase($case->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $emails = CaseEmail::with('emailAccount')
             ->where('case_id', $case->id)
             ->where('business_id', $businessId)
@@ -60,6 +64,10 @@ class CaseEmailController extends Controller
      */
     public function assignCase(Request $request, int $emailId): JsonResponse
     {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $businessId = $request->user()->business_id;
 
         $validated = $request->validate([
@@ -70,11 +78,27 @@ class CaseEmailController extends Controller
             ->where('business_id', $businessId)
             ->firstOrFail();
 
+        // If the email is already linked to a case, the caller must be able
+        // to see that case — otherwise a view_own user could pull emails away
+        // from cases they have no business touching.
+        if ($email->case_id) {
+            $sourceCase = Cases::where('id', $email->case_id)
+                ->where('business_id', $businessId)
+                ->first();
+            if ($sourceCase && !$request->user()->canViewCase($sourceCase->assigned_to)) {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+        }
+
         // If a case_id is provided, ensure it belongs to the same business
+        // and the user can see that case.
         if (!empty($validated['case_id'])) {
-            Cases::where('id', $validated['case_id'])
+            $targetCase = Cases::where('id', $validated['case_id'])
                 ->where('business_id', $businessId)
                 ->firstOrFail();
+            if (!$request->user()->canViewCase($targetCase->assigned_to)) {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
         }
 
         $email->update(['case_id' => $validated['case_id']]);
@@ -100,6 +124,17 @@ class CaseEmailController extends Controller
             ->where('id', $emailId)
             ->where('business_id', $businessId)
             ->firstOrFail();
+
+        if ($email->case_id) {
+            $linkedCase = Cases::where('id', $email->case_id)
+                ->where('business_id', $businessId)
+                ->first();
+            if ($linkedCase && !$request->user()->canViewCase($linkedCase->assigned_to)) {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+        } elseif (!$request->user()->canViewAnyCase()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         $account = $email->emailAccount;
         if (!$account) {
@@ -168,9 +203,13 @@ class CaseEmailController extends Controller
         $businessId = $request->user()->business_id;
 
         // Verify the case belongs to this business
-        Cases::where('id', $caseId)
+        $case = Cases::where('id', $caseId)
             ->where('business_id', $businessId)
             ->firstOrFail();
+
+        if (!$request->user()->canViewCase($case->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         SyncUserEmailsJob::dispatch($request->user()->id);
 

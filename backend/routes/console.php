@@ -10,3 +10,7 @@ Artisan::command('inspire', function () {
 
 // Run sync directly via Artisan command — no queue worker required.
 Schedule::command('emails:sync')->everyTenMinutes()->withoutOverlapping();
+
+// Hard-delete soft-deleted documents past their retention window (default 30 days).
+// Runs after midnight to keep daytime traffic clean of S3/KMS calls.
+Schedule::command('documents:purge-expired')->dailyAt('03:00')->withoutOverlapping();

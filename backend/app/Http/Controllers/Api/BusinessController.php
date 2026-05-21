@@ -19,6 +19,15 @@ class BusinessController extends Controller
 
     public function update(Request $request): JsonResponse
     {
+        $u = $request->user();
+        $canEdit = $u->isOwner()
+            || $u->hasPermissionSafe('business_settings.access')
+            || $u->hasPermissionSafe('business_settings.general')
+            || $u->hasPermissionSafe('business_settings.case_settings');
+        if (!$canEdit) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         $business = Business::findOrFail($request->user()->business_id);
 
         $validated = $request->validate([
@@ -63,7 +72,6 @@ class BusinessController extends Controller
             'rp_expiry_type' => 'nullable|string',
             'custom_labels' => 'nullable|array',
             'common_settings' => 'nullable|array',
-            'email_settings' => 'nullable|array',
             'sms_settings' => 'nullable|array',
             'pos_settings' => 'nullable|array',
             'ref_no_prefixes' => 'nullable|array',

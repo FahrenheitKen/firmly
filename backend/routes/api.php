@@ -7,10 +7,13 @@ use App\Http\Controllers\Api\CaseController;
 use App\Http\Controllers\Api\CaseDocumentController;
 use App\Http\Controllers\Api\CaseEmailController;
 use App\Http\Controllers\Api\CaseEventController;
+use App\Http\Controllers\Api\CourtProceedingController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\OpposingCounselController;
 use App\Http\Controllers\Api\EmailAccountController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordResetController;
+use App\Http\Controllers\Api\TaskController;
 use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\UserProfileController;
 use Illuminate\Support\Facades\Route;
@@ -59,14 +62,36 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Case Documents
     Route::get('/cases/{caseId}/documents', [CaseDocumentController::class, 'index']);
     Route::post('/cases/{caseId}/documents', [CaseDocumentController::class, 'store']);
+    // Direct browser→S3 upload (faster, skips php-fpm). Falls back to /documents above.
+    Route::post('/cases/{caseId}/documents/presign', [CaseDocumentController::class, 'presignUpload']);
+    Route::post('/cases/{caseId}/documents/register', [CaseDocumentController::class, 'registerUpload']);
     Route::get('/cases/{caseId}/documents/merge', [CaseDocumentController::class, 'merge']);
     Route::get('/cases/{caseId}/documents/{documentId}/download', [CaseDocumentController::class, 'download']);
     Route::get('/cases/{caseId}/documents/{documentId}/view', [CaseDocumentController::class, 'view']);
     Route::delete('/cases/{caseId}/documents/{documentId}', [CaseDocumentController::class, 'destroy']);
 
     // Case Events
+    Route::get('/events', [CaseEventController::class, 'all']);
     Route::get('/cases/{caseId}/events', [CaseEventController::class, 'index']);
     Route::post('/cases/{caseId}/events', [CaseEventController::class, 'store']);
+    Route::put('/cases/{caseId}/events/{eventId}', [CaseEventController::class, 'update']);
+    Route::delete('/cases/{caseId}/events/{eventId}', [CaseEventController::class, 'destroy']);
+
+    // Court Proceedings
+    Route::get('/cases/{caseId}/proceedings', [CourtProceedingController::class, 'index']);
+    Route::post('/cases/{caseId}/proceedings', [CourtProceedingController::class, 'store']);
+    Route::delete('/cases/{caseId}/proceedings/{proceedingId}', [CourtProceedingController::class, 'destroy']);
+
+    // Tasks
+    Route::apiResource('tasks', TaskController::class);
+    Route::get('/tasks/{id}/comments', [TaskController::class, 'comments']);
+    Route::post('/tasks/{id}/comments', [TaskController::class, 'storeComment']);
+
+    // Notifications
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markRead']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 
     // User Management
     Route::apiResource('users', UserManagementController::class);

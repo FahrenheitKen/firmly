@@ -56,8 +56,18 @@ class Cases extends Model
         return $this->hasMany(CaseEvent::class, 'case_id');
     }
 
+    public function proceedings()
+    {
+        return $this->hasMany(CourtProceeding::class, 'case_id');
+    }
+
     public function opposingCounsel()
     {
         return $this->belongsTo(\App\Models\OpposingCounsel::class, 'opposing_counsel_id');
+    }
+
+    public function tasks()
+    {
+        return $this->hasMany(Task::class, 'case_id');
     }
 }

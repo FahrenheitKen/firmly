@@ -2,17 +2,20 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useDateFormat, formatDate, dateFormatPlaceholder } from '@/lib/date';
 
 interface Props {
   value: string;
   onChange: (value: string) => void;
   label?: string;
+  placeholder?: string;
 }
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export default function DatePicker({ value, onChange, label }: Props) {
+export default function DatePicker({ value, onChange, label, placeholder }: Props) {
+  const dateFormat = useDateFormat();
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
   const [viewDate, setViewDate] = useState(() => value ? new Date(value) : new Date());
@@ -36,7 +39,7 @@ export default function DatePicker({ value, onChange, label }: Props) {
   useEffect(() => {
     if (open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      setPosition({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+      setPosition({ top: rect.top, left: rect.left, width: rect.width });
     }
   }, [open]);
 
@@ -68,9 +71,8 @@ export default function DatePicker({ value, onChange, label }: Props) {
     setViewMode('days');
   };
 
-  const displayValue = value
-    ? new Date(value + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    : '';
+  const displayValue = value ? formatDate(value, dateFormat) : '';
+  const emptyPlaceholder = placeholder ?? dateFormatPlaceholder(dateFormat);
 
   return (
     <div ref={wrapperRef}>
@@ -84,13 +86,13 @@ export default function DatePicker({ value, onChange, label }: Props) {
         <svg className="w-4 h-4 text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
         </svg>
-        <span className={value ? 'text-foreground' : 'text-muted'}>{displayValue || 'Select date'}</span>
+        <span className={value ? 'text-foreground' : 'text-muted'}>{displayValue || emptyPlaceholder}</span>
       </button>
 
       {open && createPortal(
         <div
           ref={popoverRef}
-          style={{ position: 'fixed', top: `${position.top}px`, left: `${position.left}px`, width: 288 }}
+          style={{ position: 'fixed', bottom: `${(typeof window !== 'undefined' ? window.innerHeight : 0) - position.top + 6}px`, left: `${position.left}px`, width: 288 }}
           className="bg-card-bg rounded-2xl border border-border shadow-lg z-[100] p-4"
         >
           {viewMode === 'days' ? (

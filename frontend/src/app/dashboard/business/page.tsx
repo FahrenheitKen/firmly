@@ -88,16 +88,22 @@ export default function BusinessSettingsPage() {
     setMessage('');
     try {
       const fd = new FormData();
-      Object.entries(business).forEach(([k, v]) => {
-        if (v !== null && v !== undefined && !['id', 'logo', 'created_at', 'updated_at'].includes(k)) {
-          fd.append(k, String(v));
+      const editableFields: (keyof Business)[] = [
+        'name', 'start_date', 'tax_number_1', 'tax_number_2', 'time_zone',
+        'fy_start_month', 'accounting_method', 'date_format', 'time_format',
+        'currency_symbol_placement', 'currency_precision', 'transaction_edit_days',
+      ];
+      editableFields.forEach((k) => {
+        const v = business[k];
+        if (v !== null && v !== undefined) {
+          fd.append(k as string, String(v));
         }
       });
       if (logoFile) fd.append('logo', logoFile);
       fd.append('_method', 'PUT');
       const res = await api.post<{ business: Business }>('/business', fd, token);
       setBusiness(res.business);
-      setMessage('Settings saved');
+      setMessage('Settings saved successfully');
       setLogoFile(null);
       setTimeout(() => setMessage(''), 3000);
     } catch { setMessage('Failed to save'); } finally { setSaving(false); }

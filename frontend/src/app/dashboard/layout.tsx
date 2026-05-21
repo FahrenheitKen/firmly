@@ -3,7 +3,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { NotificationsProvider } from '@/lib/notifications-context';
+import { LocationsProvider } from '@/lib/locations-context';
 import Sidebar from '@/components/ui/sidebar';
+import NotificationBell from '@/components/ui/notification-bell';
 
 function UserMenu() {
   const { user, logout } = useAuth();
@@ -68,25 +71,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [user, loading, router]);
 
-  if (loading || !user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
+  const ready = !loading && !!user;
 
   return (
-    <div className="min-h-screen bg-background">
-      <Sidebar />
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 bg-card-bg border-b border-border">
-          <div className="flex items-center justify-end px-4 sm:px-6 lg:px-8 h-14">
-            <UserMenu />
+    <NotificationsProvider>
+      <LocationsProvider>
+        <div className="min-h-screen bg-background">
+          <Sidebar />
+          <div className="lg:pl-64">
+            <header className="sticky top-0 z-30 bg-card-bg border-b border-border">
+              <div className="flex items-center justify-end gap-1 px-4 sm:px-6 lg:px-8 h-14">
+                {ready && <NotificationBell />}
+                {ready && <UserMenu />}
+              </div>
+            </header>
+            <main className="p-4 sm:p-6 lg:p-8">
+              {ready ? (
+                children
+              ) : (
+                <div className="flex items-center justify-center min-h-[60vh]">
+                  <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+                </div>
+              )}
+            </main>
           </div>
-        </header>
-        <main className="p-4 sm:p-6 lg:p-8">{children}</main>
-      </div>
-    </div>
+        </div>
+      </LocationsProvider>
+    </NotificationsProvider>
   );
 }

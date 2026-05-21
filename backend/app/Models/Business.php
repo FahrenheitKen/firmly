@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use App\Observers\BusinessObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 
+#[ObservedBy([BusinessObserver::class])]
 class Business extends Model
 {
     protected $table = 'business';
@@ -15,7 +18,7 @@ class Business extends Model
         return [
             'ref_no_prefixes' => 'array',
             'enabled_modules' => 'array',
-            'email_settings' => 'array',
+            'email_settings' => 'encrypted:array',
             'sms_settings' => 'array',
             'pos_settings' => 'array',
             'common_settings' => 'array',

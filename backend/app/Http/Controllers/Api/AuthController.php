@@ -136,7 +136,7 @@ class AuthController extends Controller
             ->get();
 
         return response()->json([
-            'user' => $user->load(['business', 'roles', 'activeLocation']),
+            'user' => $user->load(['business', 'roles.permissions', 'activeLocation']),
             'permitted_locations' => $permittedLocations,
             'token' => $token,
         ]);
@@ -169,6 +169,8 @@ class AuthController extends Controller
         $permittedLocations = BusinessLocation::whereIn('id', $permittedIds)
             ->select('id', 'name', 'city', 'country')
             ->get();
+
+        $user->makeVisible('bank_details');
 
         return response()->json([
             'user' => $user->load(['business', 'roles.permissions', 'activeLocation']),

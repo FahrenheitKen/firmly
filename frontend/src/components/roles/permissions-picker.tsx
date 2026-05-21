@@ -11,12 +11,19 @@ interface Props {
 
 const EXCLUDED_GROUPS = new Set(['product', 'sell', 'purchase']);
 
+// Permissions in the same set are mutually exclusive — picking one
+// automatically deselects the other.
+const EXCLUSIVE_PAIRS: Record<string, string> = {
+  'case.view_own': 'case.view_all',
+  'case.view_all': 'case.view_own',
+};
+
 const groupPalette: Record<string, { bg: string; dot: string; label: string }> = {
-  stock:    { bg: 'bg-amber-50', dot: 'bg-amber-500', label: 'text-amber-700' },
-  report:   { bg: 'bg-rose-50', dot: 'bg-rose-500', label: 'text-rose-700' },
-  user:     { bg: 'bg-cyan-50', dot: 'bg-cyan-500', label: 'text-cyan-700' },
-  setting:  { bg: 'bg-primary/5', dot: 'bg-primary', label: 'text-primary' },
-  general:  { bg: 'bg-background', dot: 'bg-muted', label: 'text-muted' },
+  user:              { bg: 'bg-cyan-50', dot: 'bg-cyan-500', label: 'text-cyan-700' },
+  case:              { bg: 'bg-violet-50', dot: 'bg-violet-500', label: 'text-violet-700' },
+  client:            { bg: 'bg-emerald-50', dot: 'bg-emerald-500', label: 'text-emerald-700' },
+  business_settings: { bg: 'bg-primary/5', dot: 'bg-primary', label: 'text-primary' },
+  general:           { bg: 'bg-background', dot: 'bg-muted', label: 'text-muted' },
 };
 
 const permLabels: Record<string, string> = {
@@ -34,22 +41,37 @@ const permLabels: Record<string, string> = {
   assign: 'Assign',
 };
 
+// Per-permission display label overrides. Falls back to permLabels[action] then
+// to the raw action string.
+const permActionLabels: Record<string, string> = {
+  'business_settings.access': 'Roles & Email OAuth',
+  'business_settings.general': 'General Settings',
+  'business_settings.firm_branches': 'Firm Branches',
+  'business_settings.case_settings': 'Case Settings',
+};
+
+// Per-group display label overrides. Falls back to a Title Case of the group key.
+const groupLabels: Record<string, string> = {
+  business_settings: 'Settings',
+};
+
 const permDescriptions: Record<string, string> = {
-  'stock.view': 'View stock levels and movements',
-  'stock.create': 'Record stock adjustments',
-  'stock.edit': 'Modify stock entries',
-  'stock.delete': 'Remove stock movement records',
-  'report.view': 'View all reports and analytics',
-  'report.export': 'Export reports to files',
   'user.view': 'View user accounts and profiles',
   'user.create': 'Invite and add new users',
-  'user.edit': 'Modify user roles and details',
+  'user.update': 'Modify user roles and details',
   'user.delete': 'Remove users from the system',
-  'setting.view': 'View system settings',
-  'setting.edit': 'Modify system configuration',
-  'setting.access': 'Access sensitive settings area',
-  'general.manage': 'General system management',
-  'general.access': 'Basic system access',
+  'case.view_own': 'See only cases assigned to this user (and their events on the calendar)',
+  'case.view_all': 'See every case in the business — overrides view_own',
+  'case.create': 'Create new cases',
+  'case.update': 'Edit case details and status',
+  'case.delete': 'Soft-delete cases',
+  'client.create': 'Add new clients',
+  'client.update': 'Edit client details and toggle active status',
+  'client.delete': 'Delete clients',
+  'business_settings.access': 'Manage roles and email OAuth credentials',
+  'business_settings.general': 'Access the General Settings module',
+  'business_settings.firm_branches': 'Access the Firm Branches module',
+  'business_settings.case_settings': 'Access the Case Settings module',
 };
 
 export default function PermissionsPicker({ selectedPerms, onToggle, token }: Props) {
@@ -71,6 +93,16 @@ export default function PermissionsPicker({ selectedPerms, onToggle, token }: Pr
   const selectedSet = new Set(selectedPerms);
   const formatGroupName = (g: string) => g.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
 
+  const handleToggle = (perm: string) => {
+    const conflict = EXCLUSIVE_PAIRS[perm];
+    // If we're about to enable `perm` and its mutually-exclusive sibling is
+    // currently selected, deselect the sibling first.
+    if (conflict && !selectedSet.has(perm) && selectedSet.has(conflict)) {
+      onToggle(conflict);
+    }
+    onToggle(perm);
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {Object.entries(permGroups).map(([group, perms]) => {
@@ -81,7 +113,7 @@ export default function PermissionsPicker({ selectedPerms, onToggle, token }: Pr
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${palette.dot}`} />
-                <span className={`text-sm font-semibold ${palette.label}`}>{formatGroupName(group)}</span>
+                <span className={`text-sm font-semibold ${palette.label}`}>{groupLabels[group] || formatGroupName(group)}</span>
               </div>
               <span className="text-xs text-muted">{selectedCount}/{perms.length}</span>
             </div>
@@ -111,13 +143,13 @@ export default function PermissionsPicker({ selectedPerms, onToggle, token }: Pr
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => onToggle(p)}
+                        onChange={() => handleToggle(p)}
                         className="absolute opacity-0"
                       />
                     </div>
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`text-sm ${checked ? 'font-medium text-foreground' : 'text-foreground/60'}`}>
-                        {permLabels[action] || action}
+                        {permActionLabels[p] || permLabels[action] || action}
                       </span>
                       <div className="relative group/icon ml-auto">
                         <svg className="w-3.5 h-3.5 text-muted/40 hover:text-muted transition-colors cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">

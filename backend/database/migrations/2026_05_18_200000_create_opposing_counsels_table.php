@@ -20,8 +20,13 @@ return new class extends Migration
             $table->foreign('business_id')->references('id')->on('business')->onDelete('cascade');
         });
 
+        if (Schema::hasColumn('cases', 'opposing_counsel')) {
+            Schema::table('cases', function (Blueprint $table) {
+                $table->dropColumn('opposing_counsel');
+            });
+        }
+
         Schema::table('cases', function (Blueprint $table) {
-            $table->dropColumn('opposing_counsel');
             $table->unsignedBigInteger('opposing_counsel_id')->nullable()->after('client_reference');
             $table->foreign('opposing_counsel_id')->references('id')->on('opposing_counsels')->onDelete('set null');
         });

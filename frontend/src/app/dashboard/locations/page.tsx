@@ -2,28 +2,10 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useLocations, type Location } from '@/lib/locations-context';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
-
-interface Location {
-  id: number;
-  name: string;
-  location_id: string | null;
-  landmark: string | null;
-  country: string;
-  city: string;
-  zip_code: string;
-  mobile: string | null;
-  alternate_number: string | null;
-  email: string | null;
-  website: string | null;
-  is_active: boolean;
-  custom_field1: string | null;
-  custom_field2: string | null;
-  custom_field3: string | null;
-  custom_field4: string | null;
-}
 
 const emptyForm = {
   name: '', location_id: '', landmark: '', country: '', city: '',
@@ -33,8 +15,7 @@ const emptyForm = {
 
 export default function LocationsPage() {
   const { token } = useAuth();
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { locations, loading, refresh: fetchLocations } = useLocations();
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -42,16 +23,6 @@ export default function LocationsPage() {
   const [error, setError] = useState('');
   const [openDropdown, setOpenDropdown] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const fetchLocations = async () => {
-    if (!token) return;
-    setLoading(true);
-    const res = await api.get<{ locations: Location[] }>('/locations', token);
-    setLocations(res.locations);
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchLocations(); }, [token]); // eslint-disable-line
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
