@@ -26,6 +26,21 @@ class BusinessLocation extends Model
         return $this->belongsTo(Business::class);
     }
 
+    public function users()
+    {
+        return $this->hasMany(User::class, 'active_location_id');
+    }
+
+    public function clients()
+    {
+        return $this->hasMany(Client::class, 'location_id');
+    }
+
+    public function cases()
+    {
+        return $this->hasMany(Cases::class, 'location_id');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);

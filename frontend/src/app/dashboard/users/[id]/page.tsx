@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
+import { useCurrency } from '@/lib/use-currency';
 
 interface BankDetails {
   account_holder_name: string;
@@ -25,6 +26,7 @@ const Row = ({ label, value }: { label: string; value: string | number | boolean
 
 export default function UserDetailPage() {
   const { token } = useAuth();
+  const { formatMoney } = useCurrency();
   const params = useParams();
   const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,7 +184,7 @@ export default function UserDetailPage() {
                   <Row label="Bank Code" value={bank.bank_identification_code} />
                   <Row label="Branch" value={bank.branch} />
                   <Row label="Tax Payer ID" value={bank.tax_payer_id} />
-                  <Row label="Basic Salary" value={bank.basic_salary ? `KES ${Number(bank.basic_salary).toLocaleString()}` : '-'} />
+                  <Row label="Basic Salary" value={bank.basic_salary ? formatMoney(bank.basic_salary) : '-'} />
                 </div>
               ) : (
                 <div className="flex flex-col items-center py-8 text-center">

@@ -136,10 +136,26 @@ class AuthController extends Controller
             ->get();
 
         return response()->json([
-            'user' => $user->load(['business', 'roles.permissions', 'activeLocation']),
+            'user' => $user->load(['business.currency', 'roles.permissions', 'activeLocation']),
             'permitted_locations' => $permittedLocations,
             'token' => $token,
+            'must_change_password' => (bool) $user->must_change_password,
         ]);
+    }
+
+    public function forceChangePassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $user = $request->user();
+        $user->update([
+            'password' => $request->password,
+            'must_change_password' => false,
+        ]);
+
+        return response()->json(['message' => 'Password updated successfully.']);
     }
 
     public function logout(Request $request): JsonResponse
@@ -173,7 +189,7 @@ class AuthController extends Controller
         $user->makeVisible('bank_details');
 
         return response()->json([
-            'user' => $user->load(['business', 'roles.permissions', 'activeLocation']),
+            'user' => $user->load(['business.currency', 'roles.permissions', 'activeLocation']),
             'permitted_locations' => $permittedLocations,
         ]);
     }

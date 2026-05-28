@@ -33,7 +33,7 @@ class CaseAssignedNotification extends Notification
 
     public function toMail($notifiable): MailMessage
     {
-        $url = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:3000')), '/') . "/dashboard/cases/{$this->case->id}";
+        $url = rtrim(config('app.frontend_url'), '/') . "/dashboard/cases/{$this->case->id}";
         $caseLabel = $this->case->case_number ? "{$this->case->case_number} — {$this->case->title}" : $this->case->title;
 
         return (new MailMessage)

@@ -62,7 +62,7 @@ export default function CreateUserPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<Record<string, unknown>>({
     surname: '', first_name: '', last_name: '', email: '',
-    password: '', role_id: '', allow_login: true, contact_no: '',
+    role_id: '', allow_login: true, contact_no: '',
     dob: '', gender: '', marital_status: '', blood_group: '',
     language: 'en', max_sales_discount_percent: '', location_permissions: [] as number[],
     account_holder_name: '', account_number: '', bank_name: '',
@@ -216,11 +216,14 @@ export default function CreateUserPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input label="Password" required type="password" placeholder="Min. 8 characters" value={form.password as string} onChange={(e) => setForm({ ...form, password: e.target.value })} minLength={8} />
                   <Select label="Role" required value={form.role_id as string} onChange={(e) => setForm({ ...form, role_id: Number(e.target.value) })}>
                     <option value="">Select Role</option>
                     {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </Select>
+                </div>
+                <div className="mt-3 flex items-start gap-2.5 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl text-sm text-primary">
+                  <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  A temporary password will be emailed to the user. They will be prompted to change it on first login.
                 </div>
                 <div className="mt-4">
                   <CheckCard checked={form.allow_login as boolean} onChange={(v) => setForm({ ...form, allow_login: v })} label="Allow Login" description="User can sign in to the system" />
@@ -334,7 +337,7 @@ export default function CreateUserPage() {
             <div className="bg-card-bg rounded-2xl border border-border/60 p-5">
               <h3 className="text-xs font-semibold text-muted uppercase tracking-widest mb-3">Tips</h3>
               <ul className="space-y-2.5 text-sm text-muted">
-                <li className="flex items-start gap-2.5"><span className="text-muted/50 mt-0.5">•</span>Use a real email for password recovery</li>
+                <li className="flex items-start gap-2.5"><span className="text-muted/50 mt-0.5">•</span>A temporary password will be emailed to the user</li>
                 <li className="flex items-start gap-2.5"><span className="text-muted/50 mt-0.5">•</span>Assign the appropriate role carefully</li>
                 <li className="flex items-start gap-2.5"><span className="text-muted/50 mt-0.5">•</span>Location access can be changed later</li>
               </ul>

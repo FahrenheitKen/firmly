@@ -35,16 +35,51 @@ interface ContextValue {
 
 const NotificationsContext = createContext<ContextValue | null>(null);
 
-const POLL_INTERVAL_MS = 15_000;
+const POLL_INTERVAL_MS = 60_000;
 
 const sessionKey = (userId: number | string) => `firmly.notif.lastSeenId:${userId}`;
 
+// ---------- Sound ----------
+//
+// Browsers (Chrome, Safari) block AudioContext from producing sound until a
+// user gesture occurs. The previous implementation created a fresh context per
+// ding, so polled notifications consistently arrived in `suspended` state —
+// the oscillator ran but produced silence. Fix: keep ONE context, warm it on
+// the first click/keypress anywhere in the app, and resume() if it ever falls
+// back to suspended.
+let sharedAudioCtx: AudioContext | null = null;
+let audioUnlocked = false;
+
+function unlockAudio(): void {
+  if (audioUnlocked || typeof window === 'undefined') return;
+  const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AC) return;
+  try {
+    if (!sharedAudioCtx) sharedAudioCtx = new AC();
+    if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(() => {});
+    audioUnlocked = true;
+  } catch {
+    // ignore
+  }
+}
+
+if (typeof window !== 'undefined') {
+  const handler = () => {
+    unlockAudio();
+    window.removeEventListener('pointerdown', handler);
+    window.removeEventListener('keydown', handler);
+  };
+  window.addEventListener('pointerdown', handler, { once: true });
+  window.addEventListener('keydown', handler, { once: true });
+}
+
 function playDing(): void {
   if (typeof window === 'undefined') return;
+  unlockAudio();
+  if (!sharedAudioCtx) return;
   try {
-    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    const ctx = new AC();
+    const ctx = sharedAudioCtx;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
@@ -57,7 +92,7 @@ function playDing(): void {
     osc.start();
     osc.stop(ctx.currentTime + 0.3);
   } catch {
-    // ignore — autoplay may be blocked until a user gesture occurs
+    // ignore
   }
 }
 

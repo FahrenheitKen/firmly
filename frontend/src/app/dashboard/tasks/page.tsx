@@ -10,6 +10,7 @@ import Modal from '@/components/ui/modal';
 import SearchableSelect from '@/components/ui/searchable-select';
 import DatePicker from '@/components/ui/date-picker';
 import TaskDrawer from '@/components/tasks/task-drawer';
+import TablePagination from '@/components/ui/table-pagination';
 
 type Status = 'Pending' | 'In Progress' | 'Completed' | 'Cancelled';
 
@@ -64,6 +65,7 @@ export default function TasksPage() {
   const canCreate = isOwner || can('task.create');
   const canUpdate = isOwner || can('task.update');
   const canDelete = isOwner || can('task.delete');
+  const canViewAll = isOwner || can('task.view_all');
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [cases, setCases] = useState<CaseLite[]>([]);
@@ -72,6 +74,9 @@ export default function TasksPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(25);
+  const [pagination, setPagination] = useState({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -87,17 +92,23 @@ export default function TasksPage() {
     if (search) params.set('search', search);
     if (statusFilter) params.set('status', statusFilter);
     if (assigneeFilter) params.set('assigned_to', assigneeFilter);
+    params.set('page', String(page));
+    params.set('per_page', String(perPage));
     const qs = params.toString();
     setLoading(true);
     try {
-      const res = await api.get<{ tasks: Task[] }>(`/tasks${qs ? `?${qs}` : ''}`, token);
-      setTasks(res.tasks);
+      const res = await api.get<{ tasks: Task[]; pagination: typeof pagination }>(`/tasks?${qs}`, token);
+      const filtered = canViewAll
+        ? res.tasks
+        : res.tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
+      setTasks(filtered);
+      if (res.pagination) setPagination(res.pagination);
     } catch {
       toast('Failed to load tasks', 'error');
     } finally {
       setLoading(false);
     }
-  }, [token, search, statusFilter, assigneeFilter, toast]);
+  }, [token, search, statusFilter, assigneeFilter, page, perPage, canViewAll, toast]);
 
   useEffect(() => {
     if (!token) return;
@@ -116,7 +127,12 @@ export default function TasksPage() {
     load();
   }, [token]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks, user?.active_location?.id]);
+  // Debounced — `fetchTasks` changes whenever `search`/filters change, so
+  // without this every keystroke fired an API call immediately.
+  useEffect(() => {
+    const timer = setTimeout(fetchTasks, 300);
+    return () => clearTimeout(timer);
+  }, [fetchTasks, user?.active_location?.id]);
 
   useEffect(() => {
     if (openDropdown === null) return;
@@ -233,15 +249,15 @@ export default function TasksPage() {
           <input
             placeholder="Search title or description..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             className="w-full pl-10 pr-4 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary text-sm transition-colors"
           />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={inputClass}>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className={inputClass}>
           <option value="">All statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+          {(canViewAll ? STATUSES : (['Pending', 'In Progress'] as Status[])).map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className={inputClass}>
+        <select value={assigneeFilter} onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1); }} className={inputClass}>
           <option value="">All assignees</option>
           <option value="me">Assigned to me</option>
           {users.map(u => <option key={u.id} value={u.id}>{fullName(u)}</option>)}
@@ -258,15 +274,15 @@ export default function TasksPage() {
         </div>
       ) : (
         <div className="bg-card-bg rounded-xl border border-border overflow-visible">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed sm:table-auto">
             <thead>
               <tr className="border-b border-border bg-gray-50">
-                <th className="w-24 px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Actions</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Title</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Case</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Assignee</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Due</th>
+                <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Actions</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Title</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Case</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Assignee</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-20 sm:w-auto">Status</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Due</th>
               </tr>
             </thead>
             <tbody>
@@ -276,18 +292,18 @@ export default function TasksPage() {
                   className="border-b border-border last:border-0 hover:bg-gray-50 cursor-pointer"
                   onClick={() => setDrawerTaskId(t.id)}
                 >
-                  <td className="px-4 py-3 relative" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-2 sm:px-4 py-3 relative" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => setOpenDropdown(openDropdown === t.id ? null : t.id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                      className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
                     >
-                      Action
+                      <span className="hidden sm:inline">Action</span>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </button>
                     {openDropdown === t.id && (
-                      <div className="dropdown-menu absolute right-0 top-full mt-1 w-52 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
+                      <div className="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
                         <button
                           onClick={() => { setOpenDropdown(null); setDrawerTaskId(t.id); }}
                           className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-gray-50 transition-colors"
@@ -332,29 +348,34 @@ export default function TasksPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-medium">
-                    <div>{t.title}</div>
+                  <td className="px-2 sm:px-4 py-3 font-medium">
+                    <div className="truncate">{t.title}</div>
                     {t.description && <div className="text-xs text-muted line-clamp-1 mt-0.5">{t.description}</div>}
                   </td>
-                  <td className="px-4 py-3 text-muted hidden md:table-cell text-xs">
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden md:table-cell text-xs">
                     {t.case ? <span className="font-mono">{t.case.case_number}</span> : <span className="text-muted/50">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-muted hidden sm:table-cell text-xs">
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden sm:table-cell text-xs">
                     {t.assignee ? fullName(t.assignee) : <span className="text-muted/50">Unassigned</span>}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${statusClass(t.status)}`}>{t.status}</span>
+                  <td className="px-2 sm:px-4 py-3">
+                    <span className={`text-xs px-1.5 sm:px-2 py-0.5 rounded-full whitespace-nowrap ${statusClass(t.status)}`}>{t.status}</span>
                   </td>
-                  <td className="px-4 py-3 text-muted hidden lg:table-cell text-xs">
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden lg:table-cell text-xs">
                     {t.due_date ? formatDate(t.due_date) : <span className="text-muted/50">—</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="px-4 py-3 text-xs text-muted border-t border-border bg-gray-50/50">
-            Showing {tasks.length} task{tasks.length !== 1 ? 's' : ''}
-          </div>
+          <TablePagination
+            currentPage={pagination.current_page}
+            lastPage={pagination.last_page}
+            perPage={pagination.per_page}
+            total={pagination.total}
+            onPageChange={(p) => setPage(p)}
+            onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          />
         </div>
       )}
 

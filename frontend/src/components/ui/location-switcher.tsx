@@ -12,11 +12,15 @@ export default function LocationSwitcher() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: MouseEvent | TouchEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
   }, []);
 
   const active = user?.active_location;
@@ -40,7 +44,7 @@ export default function LocationSwitcher() {
       {/* Trigger card */}
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 hover:border-accent/40 transition-all duration-200 group"
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/8 hover:bg-white/14 active:bg-white/20 border border-white/12 hover:border-accent/40 transition-all duration-200 group touch-manipulation"
       >
         {/* Pin icon with accent bg */}
         <div className="shrink-0 w-7 h-7 rounded-lg bg-accent/20 flex items-center justify-center">
@@ -74,17 +78,17 @@ export default function LocationSwitcher() {
           <div className="px-3 pt-2.5 pb-1.5 border-b border-gray-100">
             <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Switch Location</p>
           </div>
-          <div className="p-1.5 space-y-0.5">
+          <div className="p-1.5 space-y-0.5 max-h-60 overflow-y-auto overscroll-contain">
             {locations.map((loc) => {
               const isActive = active?.id === loc.id;
               return (
                 <button
                   key={loc.id}
                   onClick={() => handleSwitch(loc.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all duration-150 text-left ${
+                  className={`w-full flex items-center gap-2.5 px-3 py-3 rounded-lg transition-all duration-150 text-left touch-manipulation ${
                     isActive
                       ? 'bg-accent/10 border border-accent/20'
-                      : 'hover:bg-gray-50 border border-transparent'
+                      : 'hover:bg-gray-50 active:bg-gray-100 border border-transparent'
                   }`}
                 >
                   <div className={`shrink-0 w-2 h-2 rounded-full ${isActive ? 'bg-accent' : 'bg-gray-300'}`} />

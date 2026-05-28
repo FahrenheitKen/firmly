@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\CacheTenantGet;
 use App\Http\Middleware\CheckTokenBlacklist;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -20,6 +21,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->appendToGroup('api', CheckTokenBlacklist::class);
+
+        $middleware->alias([
+            'cache.tenant' => CacheTenantGet::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

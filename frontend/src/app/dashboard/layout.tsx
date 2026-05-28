@@ -61,15 +61,17 @@ function UserMenu() {
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, mustChangePassword } = useAuth();
   const router = useRouter();
 
-  // TODO: Add Next.js Middleware for server-side route protection
   useEffect(() => {
     if (!loading && !user) {
       router.replace('/login');
     }
-  }, [user, loading, router]);
+    if (!loading && user && mustChangePassword) {
+      router.replace('/login');
+    }
+  }, [user, loading, mustChangePassword, router]);
 
   const ready = !loading && !!user;
 

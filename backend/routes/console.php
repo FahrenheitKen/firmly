@@ -14,3 +14,9 @@ Schedule::command('emails:sync')->everyTenMinutes()->withoutOverlapping();
 // Hard-delete soft-deleted documents past their retention window (default 30 days).
 // Runs after midnight to keep daytime traffic clean of S3/KMS calls.
 Schedule::command('documents:purge-expired')->dailyAt('03:00')->withoutOverlapping();
+
+// Generate recurring expenses daily at 6 AM.
+Schedule::command('expenses:generate-recurring')->dailyAt('06:00')->withoutOverlapping();
+
+// Prune expired Sanctum tokens (older than config expiration + 24h buffer).
+Schedule::command('sanctum:prune-expired --hours=24')->daily();

@@ -16,12 +16,16 @@ const EXCLUDED_GROUPS = new Set(['product', 'sell', 'purchase']);
 const EXCLUSIVE_PAIRS: Record<string, string> = {
   'case.view_own': 'case.view_all',
   'case.view_all': 'case.view_own',
+  'expense.view_own': 'expense.view_all',
+  'expense.view_all': 'expense.view_own',
 };
 
 const groupPalette: Record<string, { bg: string; dot: string; label: string }> = {
   user:              { bg: 'bg-cyan-50', dot: 'bg-cyan-500', label: 'text-cyan-700' },
   case:              { bg: 'bg-violet-50', dot: 'bg-violet-500', label: 'text-violet-700' },
   client:            { bg: 'bg-emerald-50', dot: 'bg-emerald-500', label: 'text-emerald-700' },
+  expense:           { bg: 'bg-amber-50', dot: 'bg-amber-500', label: 'text-amber-700' },
+  expense_report:    { bg: 'bg-orange-50', dot: 'bg-orange-500', label: 'text-orange-700' },
   business_settings: { bg: 'bg-primary/5', dot: 'bg-primary', label: 'text-primary' },
   general:           { bg: 'bg-background', dot: 'bg-muted', label: 'text-muted' },
 };
@@ -39,6 +43,8 @@ const permLabels: Record<string, string> = {
   access: 'Access',
   configure: 'Configure',
   assign: 'Assign',
+  reassign: 'Reassign',
+  approve: 'Approve',
 };
 
 // Per-permission display label overrides. Falls back to permLabels[action] then
@@ -65,9 +71,17 @@ const permDescriptions: Record<string, string> = {
   'case.create': 'Create new cases',
   'case.update': 'Edit case details and status',
   'case.delete': 'Soft-delete cases',
+  'case.reassign': 'Reassign cases to another counsel',
   'client.create': 'Add new clients',
   'client.update': 'Edit client details and toggle active status',
   'client.delete': 'Delete clients',
+  'expense.view_own': 'See only own expenses',
+  'expense.view_all': 'See all expenses — overrides view_own',
+  'expense.create': 'Create new expenses',
+  'expense.update': 'Edit expense details',
+  'expense.delete': 'Delete expenses',
+  'expense.approve': 'Approve or reject expenses',
+  'expense_report.view': 'View expense reports',
   'business_settings.access': 'Manage roles and email OAuth credentials',
   'business_settings.general': 'Access the General Settings module',
   'business_settings.firm_branches': 'Access the Firm Branches module',

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useFormatDate } from '@/lib/date';
 import { api } from '@/lib/api';
+import { useCurrency } from '@/lib/use-currency';
 
 interface ClientCase {
   id: number;
@@ -59,6 +60,7 @@ function DetailField({ label, value }: { label: string; value: string | null | u
 
 export default function ClientDetailPage() {
   const { token } = useAuth();
+  const { formatMoney } = useCurrency();
   const formatDate = useFormatDate();
   const params = useParams();
   const router = useRouter();
@@ -153,7 +155,7 @@ export default function ClientDetailPage() {
           <DetailField label="Phone" value={client.phone} />
           <DetailField label="Alternative Contact" value={client.alternative_contact} />
           <DetailField label="Tax Number" value={client.tax_number} />
-          <DetailField label="Opening Balance" value={client.opening_balance ? `${client.opening_balance}` : '0.00'} />
+          <DetailField label="Opening Balance" value={formatMoney(client.opening_balance || 0)} />
           <DetailField label="Status" value={client.is_active ? 'Active' : 'Inactive'} />
         </div>
 

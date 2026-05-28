@@ -70,4 +70,9 @@ class Cases extends Model
     {
         return $this->hasMany(Task::class, 'case_id');
     }
+
+    public function series()
+    {
+        return $this->belongsTo(CaseSeries::class, 'case_series_id');
+    }
 }

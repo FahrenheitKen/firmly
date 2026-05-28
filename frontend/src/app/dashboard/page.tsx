@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
+import { getKenyaHoliday, getKenyaHolidaysInRange } from '@/lib/kenya-holidays';
 
 interface CalendarEvent {
   id: number;
@@ -23,7 +24,9 @@ interface CalendarEvent {
 const eventTypeColors: Record<string, string> = {
   'Bring Up': 'bg-blue-100 text-blue-700 border-blue-200',
   'Mention': 'bg-amber-100 text-amber-700 border-amber-200',
+  'Mention of Application': 'bg-orange-100 text-orange-700 border-orange-200',
   'Hearing': 'bg-purple-100 text-purple-700 border-purple-200',
+  'Hearing of Application': 'bg-violet-100 text-violet-700 border-violet-200',
   'Ruling': 'bg-emerald-100 text-emerald-700 border-emerald-200',
   'Judgement': 'bg-rose-100 text-rose-700 border-rose-200',
 };
@@ -31,7 +34,9 @@ const eventTypeColors: Record<string, string> = {
 const legendDotColors: Record<string, string> = {
   'Bring Up': 'bg-blue-500',
   'Mention': 'bg-amber-500',
+  'Mention of Application': 'bg-orange-500',
   'Hearing': 'bg-purple-500',
+  'Hearing of Application': 'bg-violet-500',
   'Ruling': 'bg-emerald-500',
   'Judgement': 'bg-rose-500',
 };
@@ -105,6 +110,10 @@ export default function DashboardPage() {
   const todayKey = toDateKey(new Date());
   const monthLabel = monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const selectedEvents = selectedDate ? (eventsByDate[selectedDate] || []) : [];
+  const monthHolidays = useMemo(
+    () => getKenyaHolidaysInRange(toDateKey(monthStart), toDateKey(monthEnd)),
+    [monthStart, monthEnd],
+  );
 
   return (
     <>
@@ -156,32 +165,63 @@ export default function DashboardPage() {
               const isToday = key === todayKey;
               const dayEvents = eventsByDate[key] || [];
               const hasEvents = dayEvents.length > 0;
+              const holidayName = getKenyaHoliday(key);
               return (
                 <button
                   key={key}
                   onClick={() => { if (hasEvents) setSelectedDate(key); }}
                   disabled={!hasEvents}
-                  className={`bg-card-bg min-h-[88px] p-1.5 text-left flex flex-col gap-1 transition-colors ${
-                    hasEvents ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'
-                  } ${inMonth ? '' : 'opacity-40'}`}
+                  title={holidayName ? `Public Holiday: ${holidayName}` : undefined}
+                  className={`min-h-[60px] sm:min-h-[88px] p-1 sm:p-1.5 text-left flex flex-col gap-0.5 sm:gap-1 transition-colors ${
+                    holidayName ? 'bg-rose-50/60' : 'bg-card-bg'
+                  } ${hasEvents ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'} ${inMonth ? '' : 'opacity-40'}`}
                 >
-                  <div className={`text-xs font-medium ${isToday ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-white' : 'text-foreground'}`}>
+                  <div className={`text-xs font-medium ${
+                    isToday
+                      ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-white'
+                      : holidayName
+                      ? 'text-rose-700'
+                      : 'text-foreground'
+                  }`}>
                     {day.getDate()}
                   </div>
+                  {holidayName && (
+                    <span className="text-[10px] leading-tight text-rose-700 font-medium truncate hidden sm:block" title={holidayName}>
+                      {holidayName}
+                    </span>
+                  )}
                   <div className="flex flex-col gap-0.5 overflow-hidden">
-                    {dayEvents.slice(0, 3).map((e) => (
-                      <span
-                        key={e.id}
-                        className={`text-[10px] leading-tight px-1.5 py-0.5 rounded border truncate ${
-                          eventTypeColors[e.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'
-                        }`}
-                        title={`${e.event_type} — ${e.case?.case_number || ''}`}
-                      >
-                        {e.case?.case_number || e.event_type}
-                      </span>
-                    ))}
-                    {dayEvents.length > 3 && (
-                      <span className="text-[10px] text-muted px-1">+{dayEvents.length - 3} more</span>
+                    <div className="hidden sm:flex flex-col gap-0.5">
+                      {dayEvents.slice(0, 3).map((e) => (
+                        <span
+                          key={e.id}
+                          className={`text-[10px] leading-tight px-1.5 py-0.5 rounded border truncate ${
+                            eventTypeColors[e.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'
+                          }`}
+                          title={`${e.event_type} — ${e.case?.case_number || ''}`}
+                        >
+                          {e.case?.case_number || e.event_type}
+                        </span>
+                      ))}
+                      {dayEvents.length > 3 && (
+                        <span className="text-[10px] text-muted px-1">+{dayEvents.length - 3} more</span>
+                      )}
+                    </div>
+                    {hasEvents && (
+                      <div className="flex gap-0.5 sm:hidden flex-wrap">
+                        {dayEvents.slice(0, 3).map((e) => (
+                          <span
+                            key={e.id}
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              legendDotColors[e.event_type] || 'bg-gray-400'
+                            }`}
+                            title={`${e.event_type} — ${e.case?.case_number || ''}`}
+                          />
+                        ))}
+                        {dayEvents.length > 3 && (
+                          <span className="text-[8px] text-muted">+{dayEvents.length - 3}</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </button>
@@ -200,7 +240,32 @@ export default function DashboardPage() {
                 <span className="text-sm text-foreground">{type}</span>
               </li>
             ))}
+            <li className="flex items-center gap-2.5 pt-2 mt-2 border-t border-border/60">
+              <span className="w-3 h-3 rounded-sm bg-rose-200 border border-rose-300" />
+              <span className="text-sm text-foreground">Kenyan public holiday</span>
+            </li>
           </ul>
+          <p className="text-[11px] text-muted mt-3 leading-snug">
+            Events cannot be scheduled on Kenyan national public holidays.
+          </p>
+
+          <div className="mt-5 pt-4 border-t border-border/60">
+            <h3 className="text-sm font-semibold mb-2">Public holidays this month</h3>
+            {monthHolidays.length === 0 ? (
+              <p className="text-xs text-muted">No public holidays in {monthLabel}.</p>
+            ) : (
+              <ul className="space-y-2">
+                {monthHolidays.map((h) => (
+                  <li key={h.date} className="flex items-start gap-2.5">
+                    <span className="text-xs font-medium text-rose-700 shrink-0 w-12 tabular-nums">
+                      {new Date(h.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                    </span>
+                    <span className="text-xs text-foreground">{h.name}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </aside>
       </div>
 

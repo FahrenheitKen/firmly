@@ -26,7 +26,7 @@ class ClientController extends Controller
                   ->orWhere('client_id', 'like', "%{$s}%");
             }))
             ->orderBy('created_at', 'desc')
-            ->paginate(min((int) $request->query('per_page', 20), 500));
+            ->paginate(min((int) $request->query('per_page', 25), 500));
 
         return response()->json([
             'clients' => $clients->items(),

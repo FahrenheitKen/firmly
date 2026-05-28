@@ -28,6 +28,9 @@ export interface Location {
   custom_field2: string | null;
   custom_field3: string | null;
   custom_field4: string | null;
+  users_count?: number;
+  clients_count?: number;
+  cases_count?: number;
 }
 
 interface LocationsContextValue {

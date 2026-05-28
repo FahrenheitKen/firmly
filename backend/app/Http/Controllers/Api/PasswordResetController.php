@@ -30,7 +30,7 @@ class PasswordResetController extends Controller
             return response()->json(['message' => 'If that email exists in our system, a password reset link has been sent.']);
         }
 
-        $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+        $frontendUrl = rtrim(config('app.frontend_url'), '/');
         $resetUrl = "{$frontendUrl}/reset-password?token=" . urlencode($token) . '&email=' . urlencode($request->email);
 
         $user->notify(new class($resetUrl) extends \Illuminate\Notifications\Notification {

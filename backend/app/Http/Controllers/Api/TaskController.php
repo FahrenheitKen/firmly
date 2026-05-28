@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ConvertCaseDocumentToPdf;
 use App\Models\Business;
 use App\Models\CaseDocument;
 use App\Models\Cases;
@@ -72,7 +73,7 @@ class TaskController extends Controller
             ->orderByRaw("CASE priority WHEN 'Urgent' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4 END")
             ->orderBy('due_date')
             ->orderBy('created_at', 'desc')
-            ->paginate(50);
+            ->paginate(min((int) $request->query('per_page', 25), 500));
 
         return response()->json([
             'tasks' => $tasks->items(),
@@ -102,7 +103,7 @@ class TaskController extends Controller
             'case_id' => 'nullable|integer|exists:cases,id',
             'due_date' => 'nullable|date',
             'documents' => 'nullable|array',
-            'documents.*' => 'file|max:10240|mimes:pdf,jpg,jpeg,png,gif,doc,docx,xls,xlsx',
+            'documents.*' => 'file|max:65536|mimes:pdf,jpg,jpeg,png,gif,doc,docx,xls,xlsx',
         ]);
 
         $hasFiles = $request->hasFile('documents');
@@ -173,6 +174,11 @@ class TaskController extends Controller
                         'uploaded_by'     => $user->id,
                     ]);
                     $documentIds[] = $doc->id;
+
+                    $ext = strtolower($file->getClientOriginalExtension());
+                    if ($ext === 'doc' || $ext === 'docx') {
+                        ConvertCaseDocumentToPdf::dispatch($doc->id);
+                    }
                 }
                 $task->documents()->sync($documentIds);
             }

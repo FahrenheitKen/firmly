@@ -64,22 +64,29 @@ class User extends Authenticatable
         return $this->business && $this->business->owner_id === $this->id;
     }
 
+    private ?array $permittedLocationsCache = null;
+
     public function permittedLocations($businessId = null)
     {
         $businessId = $businessId ?? $this->business_id;
 
-        // Business owner can access all locations
+        if ($this->permittedLocationsCache !== null) {
+            return $this->permittedLocationsCache;
+        }
+
         if ($this->isOwner()) {
-            return BusinessLocation::where('business_id', $businessId)
+            $this->permittedLocationsCache = BusinessLocation::where('business_id', $businessId)
                 ->pluck('id')
+                ->toArray();
+        } else {
+            $this->permittedLocationsCache = $this->permissions()
+                ->where('name', 'like', 'location.%')
+                ->pluck('name')
+                ->map(fn($p) => (int) str_replace('location.', '', $p))
                 ->toArray();
         }
 
-        return $this->permissions()
-            ->where('name', 'like', 'location.%')
-            ->pluck('name')
-            ->map(fn($p) => (int) str_replace('location.', '', $p))
-            ->toArray();
+        return $this->permittedLocationsCache;
     }
 
     public function canAccessLocation($locationId): bool

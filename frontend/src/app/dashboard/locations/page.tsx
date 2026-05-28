@@ -77,14 +77,24 @@ export default function LocationsPage() {
   };
 
   const toggleActive = async (id: number) => {
-    await api.post(`/locations/${id}/toggle-active`, undefined, token!);
-    fetchLocations();
+    try {
+      await api.post(`/locations/${id}/toggle-active`, undefined, token!);
+      fetchLocations();
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      alert(e.message || 'Failed to toggle status');
+    }
   };
 
   const deleteLocation = async (id: number) => {
-    if (!confirm('Delete this location?')) return;
-    await api.delete(`/locations/${id}`, token!);
-    fetchLocations();
+    if (!confirm('Delete this location? Users assigned to it will be moved to another active location.')) return;
+    try {
+      await api.delete(`/locations/${id}`, token!);
+      fetchLocations();
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      alert(e.message || 'Failed to delete location');
+    }
   };
 
   const inputClass = 'w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-sm';
@@ -106,27 +116,30 @@ export default function LocationsPage() {
       ) : locations.length === 0 ? (
         <div className="text-center py-12 text-muted">No locations found. Add your first location.</div>
       ) : (
-        <div className="bg-card-bg rounded-xl border border-border">
-          <table className="w-full text-sm">
+        <div className="bg-card-bg rounded-xl border border-border overflow-visible">
+          <table className="w-full text-sm table-fixed sm:table-auto">
             <thead>
               <tr className="border-b border-border bg-gray-50/50">
-                <th className="w-12 px-4 py-3"></th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Location ID</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Address</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Contact</th>
-                <th className="text-center px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Status</th>
+                <th className="w-16 sm:w-20 px-2 sm:px-4 py-3"></th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Name</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Location ID</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Address</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Contact</th>
+                <th className="text-center px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Users</th>
+                <th className="text-center px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Clients</th>
+                <th className="text-center px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Cases</th>
+                <th className="text-center px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-20 sm:w-auto">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {locations.map((loc) => (
                 <tr key={loc.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-4 py-3 text-center relative">
+                  <td className="px-2 sm:px-4 py-3 text-center relative">
                     <button
                       onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === loc.id ? null : loc.id); }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                      className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
                     >
-                      Action
+                      <span className="hidden sm:inline">Action</span>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
@@ -164,16 +177,19 @@ export default function LocationsPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-medium">{loc.name}</td>
-                  <td className="px-4 py-3 text-muted">{loc.location_id || '—'}</td>
-                  <td className="px-4 py-3 text-muted max-w-[200px] truncate" title={[loc.landmark, loc.city, loc.country, loc.zip_code].filter(Boolean).join(', ')}>
+                  <td className="px-2 sm:px-4 py-3 font-medium truncate">{loc.name}</td>
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden lg:table-cell">{loc.location_id || '—'}</td>
+                  <td className="px-2 sm:px-4 py-3 text-muted max-w-[200px] truncate hidden md:table-cell" title={[loc.landmark, loc.city, loc.country, loc.zip_code].filter(Boolean).join(', ')}>
                     {[loc.landmark, loc.city, loc.country, loc.zip_code].filter(Boolean).join(', ')}
                   </td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden lg:table-cell">
                     {[loc.mobile, loc.email].filter(Boolean).join(', ') || '—'}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-block px-2 py-0.5 text-xs rounded-full ${loc.is_active ? 'bg-green-100 text-success' : 'bg-red-100 text-danger'}`}>
+                  <td className="px-2 sm:px-4 py-3 text-center text-muted hidden sm:table-cell">{loc.users_count ?? 0}</td>
+                  <td className="px-2 sm:px-4 py-3 text-center text-muted hidden sm:table-cell">{loc.clients_count ?? 0}</td>
+                  <td className="px-2 sm:px-4 py-3 text-center text-muted hidden sm:table-cell">{loc.cases_count ?? 0}</td>
+                  <td className="px-2 sm:px-4 py-3 text-center">
+                    <span className={`inline-block px-1.5 sm:px-2 py-0.5 text-xs rounded-full whitespace-nowrap ${loc.is_active ? 'bg-green-100 text-success' : 'bg-red-100 text-danger'}`}>
                       {loc.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>

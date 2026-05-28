@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Cases;
 use App\Models\CaseEvent;
 use App\Models\CourtProceeding;
+use App\Rules\NotKenyaHoliday;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -52,7 +53,7 @@ class CaseEventController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $events = $case->events()->orderBy('event_date', 'asc')->orderBy('created_at', 'asc')->limit(500)->get();
+        $events = $case->events()->with('createdBy:id,first_name,last_name')->orderBy('event_date', 'asc')->orderBy('created_at', 'asc')->limit(500)->get();
 
         return response()->json(['events' => $events]);
     }
@@ -72,9 +73,21 @@ class CaseEventController extends Controller
         }
 
         $validated = $request->validate([
-            'event_type' => 'required|in:Bring Up,Mention,Hearing,Ruling,Judgement',
-            'event_date' => 'required|date',
+            'event_type' => 'required|in:Bring Up,Mention,Hearing,Ruling,Judgement,Hearing of Application,Mention of Application',
+            'event_date' => ['required', 'date', new NotKenyaHoliday()],
         ]);
+
+        $duplicate = $case->events()
+            ->where('event_type', $validated['event_type'])
+            ->whereDate('event_date', $validated['event_date'])
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json([
+                'message' => "A {$validated['event_type']} event already exists on this date for this case.",
+                'errors' => ['event_date' => ["A {$validated['event_type']} event already exists on this date."]],
+            ], 422);
+        }
 
         $event = $case->events()->create([
             'event_type' => $validated['event_type'],
@@ -82,7 +95,7 @@ class CaseEventController extends Controller
             'created_by' => $request->user()->id,
         ]);
 
-        return response()->json(['event' => $event], 201);
+        return response()->json(['event' => $event->load('createdBy:id,first_name,last_name')], 201);
     }
 
     public function update(Request $request, int $caseId, int $eventId): JsonResponse
@@ -102,13 +115,26 @@ class CaseEventController extends Controller
         $event = $case->events()->findOrFail($eventId);
 
         $validated = $request->validate([
-            'event_type' => 'required|in:Bring Up,Mention,Hearing,Ruling,Judgement',
-            'event_date' => 'required|date',
+            'event_type' => 'required|in:Bring Up,Mention,Hearing,Ruling,Judgement,Hearing of Application,Mention of Application',
+            'event_date' => ['required', 'date', new NotKenyaHoliday()],
         ]);
+
+        $duplicate = $case->events()
+            ->where('id', '!=', $event->id)
+            ->where('event_type', $validated['event_type'])
+            ->whereDate('event_date', $validated['event_date'])
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json([
+                'message' => "A {$validated['event_type']} event already exists on this date for this case.",
+                'errors' => ['event_date' => ["A {$validated['event_type']} event already exists on this date."]],
+            ], 422);
+        }
 
         $event->update($validated);
 
-        return response()->json(['event' => $event->fresh()]);
+        return response()->json(['event' => $event->fresh()->load('createdBy:id,first_name,last_name')]);
     }
 
     public function destroy(Request $request, int $caseId, int $eventId): JsonResponse

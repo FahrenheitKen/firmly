@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
+import TablePagination from '@/components/ui/table-pagination';
 
 interface Client {
   id: number;
@@ -60,6 +61,9 @@ export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(25);
+  const [pagination, setPagination] = useState({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
@@ -81,18 +85,20 @@ export default function ClientsPage() {
   const fetchClients = async () => {
     if (!token) return;
     setLoading(true);
-    const params = search ? `?search=${encodeURIComponent(search)}` : '';
-    const res = await api.get<{ clients: Client[] }>(`/clients${params}`, token);
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    params.set('page', String(page));
+    params.set('per_page', String(perPage));
+    const res = await api.get<{ clients: Client[]; pagination: typeof pagination }>(`/clients?${params}`, token);
     setClients(res.clients);
+    if (res.pagination) setPagination(res.pagination);
     setLoading(false);
   };
-
-  useEffect(() => { fetchClients(); }, [token, user?.active_location?.id]); // eslint-disable-line
 
   useEffect(() => {
     const timer = setTimeout(fetchClients, 300);
     return () => clearTimeout(timer);
-  }, [search]); // eslint-disable-line
+  }, [token, user?.active_location?.id, search, page, perPage]); // eslint-disable-line
 
   const openCreate = () => { setForm(defaultForm); setError(''); setShowModal(true); };
 
@@ -157,7 +163,7 @@ export default function ClientsPage() {
         <input
           placeholder="Search clients by name, email, phone or company..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           className="w-full pl-10 pr-4 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary text-sm transition-colors"
         />
       </div>
@@ -170,32 +176,32 @@ export default function ClientsPage() {
         </div>
       ) : (
         <div className="bg-card-bg rounded-xl border border-border overflow-visible">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed sm:table-auto">
             <thead>
               <tr className="border-b border-border bg-gray-50">
-                <th className="w-24 px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Actions</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Client ID</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Email</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Phone</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Type</th>
+                <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Actions</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Client ID</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Name</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Email</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Phone</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Type</th>
               </tr>
             </thead>
             <tbody>
               {clients.map((c) => (
                 <tr key={c.id} className="border-b border-border last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3 relative">
+                  <td className="px-2 sm:px-4 py-3 relative">
                     <button
                       onClick={() => setOpenDropdown(openDropdown === c.id ? null : c.id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                      className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
                     >
-                      Action
+                      <span className="hidden sm:inline">Action</span>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </button>
                     {openDropdown === c.id && (
-                      <div className="dropdown-menu absolute right-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
+                      <div className="dropdown-menu absolute left-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
                         <button onClick={() => viewClient(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-primary hover:bg-primary/5 transition-colors">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                           View
@@ -224,11 +230,11 @@ export default function ClientsPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs font-mono text-muted">{c.client_id || '-'}</td>
-                  <td className="px-4 py-3 font-medium">{c.client_type === 'business' ? c.business_name : [c.prefix, c.first_name, c.middle_name, c.last_name].filter(Boolean).join(' ')}</td>
-                  <td className="px-4 py-3 text-muted hidden sm:table-cell">{c.email || '-'}</td>
-                  <td className="px-4 py-3 text-muted hidden md:table-cell">{c.phone || '-'}</td>
-                  <td className="px-4 py-3 hidden lg:table-cell">
+                  <td className="px-2 sm:px-4 py-3 text-xs font-mono text-muted hidden sm:table-cell">{c.client_id || '-'}</td>
+                  <td className="px-2 sm:px-4 py-3 font-medium truncate">{c.client_type === 'business' ? c.business_name : [c.prefix, c.first_name, c.middle_name, c.last_name].filter(Boolean).join(' ')}</td>
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden md:table-cell">{c.email || '-'}</td>
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden lg:table-cell">{c.phone || '-'}</td>
+                  <td className="px-2 sm:px-4 py-3 hidden lg:table-cell">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${c.client_type === 'business' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
                       {c.client_type === 'business' ? 'Business' : 'Individual'}
                     </span>
@@ -237,9 +243,14 @@ export default function ClientsPage() {
               ))}
             </tbody>
           </table>
-          <div className="px-4 py-3 text-xs text-muted border-t border-border bg-gray-50/50">
-            Showing {clients.length} client{clients.length !== 1 ? 's' : ''}
-          </div>
+          <TablePagination
+            currentPage={pagination.current_page}
+            lastPage={pagination.last_page}
+            perPage={pagination.per_page}
+            total={pagination.total}
+            onPageChange={(p) => setPage(p)}
+            onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          />
         </div>
       )}
 

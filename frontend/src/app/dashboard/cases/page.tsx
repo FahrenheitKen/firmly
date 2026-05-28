@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -9,6 +9,8 @@ import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
 import SearchableSelect from '@/components/ui/searchable-select';
 import DatePicker from '@/components/ui/date-picker';
+import TablePagination from '@/components/ui/table-pagination';
+import { getKenyaHoliday } from '@/lib/kenya-holidays';
 
 interface OpposingCounsel {
   id: number;
@@ -36,6 +38,7 @@ interface CaseItem {
   opposing_counsel_id: number | null;
   opposing_counsel?: { id: number; name: string; firm: string | null } | null;
   court: string | null;
+  court_number_filed: string | null;
   judge: string | null;
   filed_date: string | null;
   closed_date: string | null;
@@ -72,11 +75,16 @@ export default function CasesPage() {
   const canCreate = can('case.create');
   const canUpdate = can('case.update');
   const canDelete = can('case.delete');
+  const canReassign = can('case.reassign');
+  const canViewAll = can('case.view_all') || can('case.view');
   const router = useRouter();
   const { toast: showToast } = useToast();
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(25);
+  const [pagination, setPagination] = useState({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
   const [openDropdown, setOpenDropdown] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -86,10 +94,15 @@ export default function CasesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number>(-1);
   const [businessName, setBusinessName] = useState('');
   const [businessId, setBusinessId] = useState(0);
   const [caseFormat, setCaseFormat] = useState('');
   const [caseCounter, setCaseCounter] = useState(0);
+  const [filterClient, setFilterClient] = useState('');
+  const [filterAssigned, setFilterAssigned] = useState('');
+  const [filterClients, setFilterClients] = useState<Client[]>([]);
+  const [filterUsers, setFilterUsers] = useState<User[]>([]);
 
   const [step, setStep] = useState<1 | 2>(1);
   const [opposingCounsels, setOpposingCounsels] = useState<OpposingCounsel[]>([]);
@@ -116,6 +129,8 @@ export default function CasesPage() {
     case_number: string;
     assigned_to: string;
     court: string;
+    court_number_filed: string;
+    judge: string;
     filed_date: string;
     is_recovery: boolean | null;
     case_type: string;
@@ -130,6 +145,8 @@ export default function CasesPage() {
     case_number: '',
     assigned_to: '',
     court: '',
+    court_number_filed: '',
+    judge: '',
     filed_date: '',
     is_recovery: null,
     case_type: 'Plaintiff',
@@ -149,25 +166,41 @@ export default function CasesPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, [openDropdown]);
 
+  useEffect(() => {
+    if (!token || !canViewAll) return;
+    Promise.all([
+      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
+      api.get<{ users: User[] }>('/users?per_page=500', token),
+    ]).then(([cRes, uRes]) => {
+      setFilterClients(cRes.clients);
+      setFilterUsers(uRes.users);
+    }).catch(() => {});
+  }, [token, canViewAll]); // eslint-disable-line
+
   const fetchCases = useCallback(async () => {
     if (!token) return;
     setLoading(true);
-    const params = search ? `?search=${encodeURIComponent(search)}` : '';
-    const res = await api.get<{ cases: CaseItem[] }>(`/cases${params}`, token);
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (filterClient) params.set('client_id', filterClient);
+    if (filterAssigned) params.set('assigned_to', filterAssigned);
+    params.set('page', String(page));
+    params.set('per_page', String(perPage));
+    const qs = params.toString();
+    const res = await api.get<{ cases: CaseItem[]; pagination: typeof pagination }>(`/cases?${qs}`, token);
     setCases(res.cases);
+    if (res.pagination) setPagination(res.pagination);
     setLoading(false);
-  }, [token, search, user?.active_location?.id]); // eslint-disable-line
-
-  useEffect(() => { fetchCases(); }, [token, fetchCases]);
+  }, [token, search, filterClient, filterAssigned, page, perPage, user?.active_location?.id]); // eslint-disable-line
 
   useEffect(() => {
     const timer = setTimeout(fetchCases, 300);
     return () => clearTimeout(timer);
-  }, [search, fetchCases]);
+  }, [fetchCases]);
 
   const getInitials = (name?: string | null) => {
     if (!name) return '';
-    const skip = ['&', 'and', 'company', 'advocates', 'ltd', 'limited', 'inc', 'llc', 'plc', 'corporation', 'corp', 'co'];
+    const skip = ['&', 'and', 'company', 'advocate', 'advocates', 'attorney', 'attorneys', 'associate', 'associates', 'law', 'legal', 'firm', 'partners', 'partnership', 'llp', 'ltd', 'limited', 'inc', 'llc', 'plc', 'corporation', 'corp', 'co', 'group'];
     return name.trim().split(/\s+/).filter(w => !skip.includes(w.toLowerCase())).map(w => w[0]).join('').toUpperCase();
   };
 
@@ -203,7 +236,7 @@ export default function CasesPage() {
   };
 
   const openCreate = () => {
-    setForm({ title: '', client_id: '', client_reference: '', parties: '', our_reference: '', case_number: '', assigned_to: '', court: '', filed_date: '', is_recovery: null, case_type: 'Plaintiff', is_filed_in_court: false, opposing_counsel_id: '' });
+    setForm({ title: '', client_id: '', client_reference: '', parties: '', our_reference: '', case_number: '', assigned_to: '', court: '', court_number_filed: '', judge: '', filed_date: '', is_recovery: null, case_type: 'Plaintiff', is_filed_in_court: false, opposing_counsel_id: '' });
     setFiles([]);
     setError('');
     setStep(1);
@@ -237,20 +270,18 @@ export default function CasesPage() {
     if (!token) return;
     setSaving(true);
     setError('');
-    if (form.case_type === 'Plaintiff' && form.is_recovery === null) {
-      setError('Please select if this is a recovery or not');
-      setSaving(false);
-      return;
-    }
+    setUploadProgress(-1);
     const effectiveIsRecovery = form.case_type === 'Plaintiff' ? (form.is_recovery === true) : false;
     const effectiveCaseNumber = form.is_filed_in_court ? form.case_number : '';
     const effectiveFiledDate = form.is_filed_in_court ? form.filed_date : '';
+    const effectiveCourt = form.is_filed_in_court ? form.court : '';
+    const effectiveCourtNumberFiled = form.is_filed_in_court ? form.court_number_filed : '';
+    const effectiveJudge = form.is_filed_in_court ? form.judge : '';
     try {
-      const hasFiles = files.some((f) => f.size > 0 || f.name);
-      if (hasFiles) {
+      if (files.length > 0) {
         const fd = new FormData();
         Object.entries(form).forEach(([k, v]) => {
-          if (k === 'is_recovery' || k === 'case_number' || k === 'filed_date' || k === 'is_filed_in_court') return;
+          if (k === 'is_recovery' || k === 'case_number' || k === 'filed_date' || k === 'is_filed_in_court' || k === 'court' || k === 'court_number_filed' || k === 'judge') return;
           if (v !== null && v !== '') fd.append(k, String(v));
         });
         fd.set('description', form.parties);
@@ -258,8 +289,29 @@ export default function CasesPage() {
         fd.set('is_recovery', String(effectiveIsRecovery));
         if (effectiveCaseNumber) fd.set('case_number', effectiveCaseNumber);
         if (effectiveFiledDate) fd.set('filed_date', effectiveFiledDate);
-        files.forEach((f) => { if (f.size > 0 || f.name) fd.append('documents[]', f); });
-        await api.post('/cases', fd, token);
+        if (effectiveCourt) fd.set('court', effectiveCourt);
+        if (effectiveCourtNumberFiled) fd.set('court_number_filed', effectiveCourtNumberFiled);
+        if (effectiveJudge) fd.set('judge', effectiveJudge);
+        files.forEach((f) => fd.append('documents[]', f));
+        setUploadProgress(0);
+        let progressVal = 0;
+        const progressTimer = setInterval(() => {
+          progressVal += progressVal < 30 ? 5 : progressVal < 60 ? 3 : progressVal < 85 ? 1 : 0;
+          setUploadProgress(progressVal);
+        }, 100);
+        try {
+          await api.post('/cases', fd, token);
+          clearInterval(progressTimer);
+          setUploadProgress(90);
+          await new Promise((r) => setTimeout(r, 200));
+          setUploadProgress(95);
+          await new Promise((r) => setTimeout(r, 200));
+          setUploadProgress(100);
+          await new Promise((r) => setTimeout(r, 800));
+        } catch (uploadErr) {
+          clearInterval(progressTimer);
+          throw uploadErr;
+        }
       } else {
         const payload: Record<string, unknown> = {
           title: form.title,
@@ -269,7 +321,9 @@ export default function CasesPage() {
           description: form.parties || null,
           our_reference: form.our_reference || null,
           assigned_to: form.assigned_to || null,
-          court: form.court || null,
+          court: effectiveCourt || null,
+          court_number_filed: effectiveCourtNumberFiled || null,
+          judge: effectiveJudge || null,
           filed_date: effectiveFiledDate || null,
           is_recovery: effectiveIsRecovery,
           case_type: form.case_type,
@@ -285,6 +339,7 @@ export default function CasesPage() {
       setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to save');
     } finally {
       setSaving(false);
+      setUploadProgress(-1);
     }
   };
 
@@ -297,6 +352,7 @@ export default function CasesPage() {
     case_number: '',
     assigned_to: '',
     court: '',
+    court_number_filed: '',
     judge: '',
     opposing_counsel_id: '',
     filed_date: '',
@@ -322,6 +378,7 @@ export default function CasesPage() {
       case_number: caseItem.case_number || '',
       assigned_to: caseItem.assigned_to?.id ? String(caseItem.assigned_to.id) : '',
       court: caseItem.court || '',
+      court_number_filed: caseItem.court_number_filed || '',
       judge: caseItem.judge || '',
       opposing_counsel_id: caseItem.opposing_counsel_id ? String(caseItem.opposing_counsel_id) : '',
       filed_date: caseItem.filed_date ? caseItem.filed_date.split('T')[0] : '',
@@ -329,7 +386,7 @@ export default function CasesPage() {
       outcome: caseItem.outcome || '',
       is_recovery: caseItem.is_recovery ?? null,
       case_type: caseItem.case_type || 'Plaintiff',
-      is_filed_in_court: Boolean(caseItem.case_number) || Boolean(caseItem.filed_date),
+      is_filed_in_court: Boolean(caseItem.case_number) || Boolean(caseItem.filed_date) || Boolean(caseItem.court) || Boolean(caseItem.court_number_filed) || Boolean(caseItem.judge),
       status: caseItem.status || 'Open',
       priority: caseItem.priority || 'Medium',
     });
@@ -351,24 +408,25 @@ export default function CasesPage() {
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !editingCaseId) return;
-    if (editForm.case_type === 'Plaintiff' && editForm.is_recovery === null) {
-      setError('Please select if this is a recovery or not');
-      return;
-    }
     setSaving(true);
     setError('');
     const effectiveIsRecovery = editForm.case_type === 'Plaintiff' ? (editForm.is_recovery === true) : false;
     const effectiveCaseNumber = editForm.is_filed_in_court ? editForm.case_number : '';
     const effectiveFiledDate = editForm.is_filed_in_court ? editForm.filed_date : '';
+    const effectiveCourt = editForm.is_filed_in_court ? editForm.court : '';
+    const effectiveCourtNumberFiled = editForm.is_filed_in_court ? editForm.court_number_filed : '';
+    const effectiveJudge = editForm.is_filed_in_court ? editForm.judge : '';
     try {
       const payload: Record<string, unknown> = {
         title: editForm.title,
         client_id: editForm.client_id || '',
         client_reference: editForm.client_reference,
+        our_reference: editForm.our_reference || null,
         description: editForm.parties,
         assigned_to: editForm.assigned_to || '',
-        court: editForm.court,
-        judge: editForm.judge,
+        court: effectiveCourt || null,
+        court_number_filed: effectiveCourtNumberFiled || null,
+        judge: effectiveJudge || null,
         opposing_counsel_id: editForm.opposing_counsel_id || null,
         filed_date: effectiveFiledDate || null,
         closed_date: editForm.closed_date || null,
@@ -393,7 +451,7 @@ export default function CasesPage() {
   };
 
   const saveOpposingCounsel = async (onSaved: (id: string) => void) => {
-    if (!token || !newOC.name.trim()) return;
+    if (!token || (!newOC.name.trim() && !newOC.firm.trim())) return;
     setSavingOC(true);
     try {
       const res = await api.post<{ opposing_counsel: OpposingCounsel }>('/opposing-counsels', newOC, token);
@@ -410,13 +468,12 @@ export default function CasesPage() {
     }
   };
 
-  const addFile = () => setFiles((prev) => [...prev, new File([], '')]);
-  const removeFile = (i: number) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
-  const updateFile = (i: number, file: File | null) => {
-    const updated = [...files];
-    if (file) updated[i] = file;
-    setFiles(updated);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const addFiles = (newFiles: FileList | File[]) => {
+    const valid = Array.from(newFiles).filter((f) => f.name && f.size > 0);
+    if (valid.length > 0) setFiles((prev) => [...prev, ...valid]);
   };
+  const removeFile = (i: number) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
   const clientName = (c: CaseItem) => {
     if (!c.client) return '-';
@@ -435,9 +492,28 @@ export default function CasesPage() {
     }
   };
 
+  const duplicateCase = async (id: number) => {
+    setOpenDropdown(null);
+    if (!confirm('Duplicate this case with all its files?')) return;
+    try {
+      await api.post(`/cases/${id}/duplicate`, {}, token!);
+      fetchCases();
+      showToast('Case duplicated successfully', 'success');
+    } catch {
+      showToast('Failed to duplicate case', 'error');
+    }
+  };
+
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !eventCaseId) return;
+    const holiday = getKenyaHoliday(eventForm.event_date);
+    if (holiday) {
+      const msg = `Cannot schedule on a public holiday (${holiday})`;
+      setError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     setSaving(true);
     setError('');
     const eventCase = cases.find((c) => c.id === eventCaseId);
@@ -446,7 +522,9 @@ export default function CasesPage() {
     const eventMessages: Record<string, string> = {
       'Bring Up': 'Bring up date updated',
       'Mention': 'Mention date updated',
+      'Mention of Application': 'Mention of Application date updated',
       'Hearing': 'Hearing date updated',
+      'Hearing of Application': 'Hearing of Application date updated',
       'Ruling': 'Ruling date updated',
       'Judgement': 'Judgement date updated',
     };
@@ -508,52 +586,74 @@ export default function CasesPage() {
         }
       />
 
-      <div className="mb-4 relative">
-        <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        <input
-          placeholder="Search cases by title, number, or type..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary text-sm transition-colors"
-        />
+      <div className="mb-4 flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            placeholder="Search cases by title, number, or type..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            className="w-full pl-10 pr-4 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary text-sm transition-colors"
+          />
+        </div>
+        {canViewAll && (
+          <>
+            <div className="min-w-[180px]">
+              <SearchableSelect
+                value={filterAssigned}
+                onChange={(v) => { setFilterAssigned(v); setPage(1); }}
+                options={[{ value: '', label: 'All Assigned To' }, ...filterUsers.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+                placeholder="Search user..."
+              />
+            </div>
+            <div className="min-w-[180px]">
+              <SearchableSelect
+                value={filterClient}
+                onChange={(v) => { setFilterClient(v); setPage(1); }}
+                options={[{ value: '', label: 'All Clients' }, ...filterClients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
+                placeholder="Search client..."
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {loading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" /></div>
       ) : cases.length === 0 ? (
         <div className="text-center py-16 text-muted">
-          {search ? 'No cases match your search.' : 'No cases yet. Add your first case.'}
+          {search || filterClient || filterAssigned ? 'No cases match your filters.' : 'No cases yet. Add your first case.'}
         </div>
       ) : (
         <div className="bg-card-bg rounded-xl border border-border overflow-visible">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed sm:table-auto">
             <thead>
               <tr className="border-b border-border bg-gray-50">
-                <th className="w-24 px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Action</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Our Reference</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Client</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Client Ref</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Case Number</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Status</th>
+                <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Action</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Ref</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Client</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Client Ref</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Case Number</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-20 sm:w-auto">Status</th>
               </tr>
             </thead>
             <tbody>
               {cases.map((c) => (
                 <tr key={c.id} className="border-b border-border last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3 relative">
+                  <td className="px-2 sm:px-4 py-3 relative">
                     <button
                       onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === c.id ? null : c.id); }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                      className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
                     >
-                      Action
+                      <span className="hidden sm:inline">Action</span>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </button>
                     {openDropdown === c.id && (
-                      <div className="dropdown-menu absolute right-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
+                      <div className="dropdown-menu absolute left-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
                         <button onClick={() => { setOpenDropdown(null); router.push(`/dashboard/cases/${c.id}`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-primary hover:bg-primary/5 transition-colors">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                           View
@@ -576,6 +676,12 @@ export default function CasesPage() {
                             Add Event
                           </button>
                         )}
+                        {canCreate && (
+                          <button onClick={() => duplicateCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                            Duplicate
+                          </button>
+                        )}
                         {canDelete && (
                           <>
                             <hr className="my-1 border-border" />
@@ -588,20 +694,28 @@ export default function CasesPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs font-mono text-muted">{c.our_reference || c.case_number}</td>
-                  <td className="px-4 py-3 text-muted">{clientName(c)}</td>
-                  <td className="px-4 py-3 text-xs text-muted hidden sm:table-cell">{c.client_reference || '-'}</td>
-                  <td className="px-4 py-3 text-muted hidden sm:table-cell">{c.case_number}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 sm:px-4 py-3">
+                    <div className="text-xs font-mono text-muted truncate">{c.our_reference || c.case_number}</div>
+                    <div className="text-xs text-muted truncate sm:hidden mt-0.5">{clientName(c)}</div>
+                  </td>
+                  <td className="px-2 sm:px-4 py-3 text-muted truncate max-w-[140px] hidden sm:table-cell">{clientName(c)}</td>
+                  <td className="px-2 sm:px-4 py-3 text-xs text-muted hidden md:table-cell">{c.client_reference || '-'}</td>
+                  <td className="px-2 sm:px-4 py-3 text-muted hidden md:table-cell">{c.case_number}</td>
+                  <td className="px-2 sm:px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[c.status] || ''}`}>{c.status}</span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="px-4 py-3 text-xs text-muted border-t border-border bg-gray-50/50">
-            Showing {cases.length} case{cases.length !== 1 ? 's' : ''}
-          </div>
+          <TablePagination
+            currentPage={pagination.current_page}
+            lastPage={pagination.last_page}
+            perPage={pagination.per_page}
+            total={pagination.total}
+            onPageChange={(p) => setPage(p)}
+            onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          />
         </div>
       )}
 
@@ -631,37 +745,8 @@ export default function CasesPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <SearchableSelect
-                  label="Client"
-                  value={form.client_id}
-                  onChange={(v) => {
-                    setForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, prev.is_recovery ?? false, user?.active_location?.city) }));
-                  }}
-                  options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
-                  placeholder="Search client..."
-                />
-                <SearchableSelect
-                  label="Assigned To"
-                  value={form.assigned_to}
-                  onChange={(v) => setForm((prev) => ({ ...prev, assigned_to: v }))}
-                  options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
-                  placeholder="Search user..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Client Reference</label>
-                <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Parties</label>
-                <textarea value={form.parties} onChange={(e) => setForm({ ...form, parties: e.target.value })} rows={3} className={inputClass} placeholder="List the parties involved" />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Case Type</label>
+                  <label className="block text-sm font-medium mb-2">Case Type *</label>
                   <div className="flex gap-4">
                     {['Plaintiff', 'Defendant'].map((type) => (
                       <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
@@ -680,37 +765,60 @@ export default function CasesPage() {
 
                 {form.case_type === 'Plaintiff' && (
                   <div>
-                    <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
+                    <label className="block text-sm font-medium mb-2">Is this a recovery?</label>
                     <div className="flex gap-4">
                       <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
                           {form.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
-                          <input type="radio" name="is_recovery" checked={form.is_recovery === true} onChange={() => setForm((prev) => ({ ...prev, is_recovery: true, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, true, user?.active_location?.city) }))} className="absolute opacity-0" />
+                          <input type="radio" name="is_recovery_top" checked={form.is_recovery === true} onChange={() => setForm((prev) => ({ ...prev, is_recovery: true, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, true, user?.active_location?.city) }))} className="absolute opacity-0" />
                         </div>
                         <span>Yes</span>
                       </label>
                       <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${form.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${form.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
                           {form.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
-                          <input type="radio" name="is_recovery" checked={form.is_recovery === false} onChange={() => setForm((prev) => ({ ...prev, is_recovery: false, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) }))} className="absolute opacity-0" />
+                          <input type="radio" name="is_recovery_top" checked={form.is_recovery === false} onChange={() => setForm((prev) => ({ ...prev, is_recovery: false, our_reference: generateOurRef(businessName, businessId, prev.client_id, caseFormat, caseCounter, false, user?.active_location?.city) }))} className="absolute opacity-0" />
                         </div>
                         <span>No</span>
                       </label>
                     </div>
-                    {form.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
                   </div>
                 )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <SearchableSelect
+                  label="Client"
+                  value={form.client_id}
+                  onChange={(v) => {
+                    setForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, prev.is_recovery ?? false, user?.active_location?.city) }));
+                  }}
+                  options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
+                  placeholder="Search client..."
+                />
+                <SearchableSelect
+                  label="Assigned To"
+                  value={form.assigned_to}
+                  onChange={(v) => setForm((prev) => ({ ...prev, assigned_to: v }))}
+                  options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+                  placeholder="Search user..."
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Client Reference</label>
+                  <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+                </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Our Reference</label>
                   <input value={form.our_reference} onChange={(e) => setForm({ ...form, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Station</label>
-                  <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
-                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Parties</label>
+                <textarea value={form.parties} onChange={(e) => setForm({ ...form, parties: e.target.value })} rows={3} className={inputClass} placeholder="List the parties involved" />
               </div>
 
               <div>
@@ -718,7 +826,7 @@ export default function CasesPage() {
                   <input
                     type="checkbox"
                     checked={form.is_filed_in_court}
-                    onChange={(e) => setForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '' }))}
+                    onChange={(e) => setForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '', court: e.target.checked ? prev.court : '', court_number_filed: e.target.checked ? prev.court_number_filed : '', judge: e.target.checked ? prev.judge : '' }))}
                     className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
                   />
                   <span className="text-sm font-medium">Is the case filed in court?</span>
@@ -726,10 +834,26 @@ export default function CasesPage() {
               </div>
 
               {form.is_filed_in_court && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Case Number</label>
-                    <input value={form.case_number} onChange={(e) => setForm({ ...form, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Station</label>
+                      <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Case Number</label>
+                      <input value={form.case_number} onChange={(e) => setForm({ ...form, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Before Court No</label>
+                      <input value={form.court_number_filed} onChange={(e) => setForm({ ...form, court_number_filed: e.target.value.toUpperCase() })} className={inputClass} placeholder="Before court no" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
+                      <input value={form.judge} onChange={(e) => setForm({ ...form, judge: e.target.value })} className={inputClass} placeholder="Magistrate or Judge name" />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Date Filed in Court</label>
@@ -744,7 +868,7 @@ export default function CasesPage() {
                   type="button"
                   onClick={() => {
                     if (!form.title.trim()) { setError('Subject is required'); return; }
-                    if (form.case_type === 'Plaintiff' && form.is_recovery === null) { setError('Please select if this is a recovery or not'); return; }
+                    if (!form.case_type) { setError('Please select a case type'); return; }
                     setError('');
                     setStep(2);
                   }}
@@ -782,7 +906,7 @@ export default function CasesPage() {
                     <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-muted mb-1">Name *</label>
+                        <label className="block text-xs text-muted mb-1">Name</label>
                         <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
                       </div>
                       <div>
@@ -800,7 +924,7 @@ export default function CasesPage() {
                     </div>
                     <div className="flex justify-end gap-2">
                       <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
-                      <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                      <button type="button" disabled={savingOC || (!newOC.name.trim() && !newOC.firm.trim())} onClick={() => saveOpposingCounsel((id) => setForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
                         {savingOC ? 'Saving...' : 'Save & Select'}
                       </button>
                     </div>
@@ -810,40 +934,83 @@ export default function CasesPage() {
 
               {/* Documents */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium">Documents</label>
-                  <button type="button" onClick={addFile} className="text-xs text-primary hover:underline font-medium">+ Add File</button>
+                <label className="block text-sm font-medium mb-2">Documents</label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      addFiles(e.target.files);
+                    }
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-primary', 'bg-primary/5'); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); }}
+                  onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
+                  className="flex flex-col items-center justify-center w-full border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:text-primary transition-colors text-center"
+                >
+                  <svg className="w-6 h-6 mb-1.5 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11v4m-2-2h4" /></svg>
+                  <span className="text-sm text-muted">Click or drag files here to attach (optional)</span>
+                  <span className="text-xs text-muted mt-0.5">You can select multiple files at once</span>
                 </div>
-                {files.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={addFile}
-                    className="w-full border-2 border-dashed border-border rounded-xl py-8 text-center text-sm text-muted hover:border-primary/40 hover:text-primary transition-colors"
-                  >
-                    <svg className="w-6 h-6 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11v4m-2-2h4" /></svg>
-                    Click to attach documents (optional)
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                    {files.map((_, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <input type="file" onChange={(e) => updateFile(i, e.target.files?.[0] || null)} className="flex-1 text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/5 file:text-primary hover:file:bg-primary/10" />
-                        <button type="button" onClick={() => removeFile(i)} className="p-1.5 text-danger hover:bg-danger/5 rounded-lg transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                      </div>
-                    ))}
+                {files.length > 0 && (
+                  <div className="mt-3 space-y-1.5">
+                    {files.map((f, i) => {
+                      const sizeKB = f.size / 1024;
+                      const sizeLabel = sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB.toFixed(0)} KB`;
+                      return (
+                        <div key={i} className="bg-gray-50 border border-border rounded-lg overflow-hidden">
+                          <div className="flex items-center gap-2 px-3 py-2">
+                            <svg className="w-4 h-4 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            <span className="flex-1 text-sm truncate">{f.name}</span>
+                            <span className="text-xs text-muted shrink-0">{sizeLabel}</span>
+                            {uploadProgress >= 0 ? (
+                              <span className="text-xs font-medium text-primary shrink-0">{uploadProgress < 100 ? `${uploadProgress}%` : 'Done'}</span>
+                            ) : (
+                              <button type="button" onClick={() => removeFile(i)} className="p-1 text-danger hover:bg-danger/5 rounded transition-colors shrink-0">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                              </button>
+                            )}
+                          </div>
+                          {uploadProgress >= 0 && (
+                            <div className="h-1 bg-gray-200">
+                              <div className={`h-1 transition-all duration-300 ${uploadProgress >= 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${Math.min(uploadProgress, 100)}%` }} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {files.length > 1 && (
+                      <div className="text-xs text-muted text-right">{files.length} files &middot; {(() => { const total = files.reduce((s, f) => s + f.size, 0) / 1024; return total >= 1024 ? `${(total / 1024).toFixed(1)} MB` : `${total.toFixed(0)} KB`; })()}</div>
+                    )}
                   </div>
                 )}
               </div>
 
+              {uploadProgress >= 0 && (
+                <div className="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-medium">{uploadProgress < 100 ? 'Uploading files...' : 'Processing...'}</span>
+                    <span className="text-sm font-medium text-primary">{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div className={`h-2 rounded-full transition-all duration-300 ${uploadProgress >= 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${Math.min(uploadProgress, 100)}%` }} />
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-between gap-3 pt-4 border-t border-border">
-                <button type="button" onClick={() => { setStep(1); setError(''); }} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">
+                <button type="button" disabled={saving} onClick={() => { setStep(1); setError(''); }} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground disabled:opacity-50">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                   Back
                 </button>
                 <button type="submit" disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
-                  {saving ? 'Creating...' : 'Create Case'}
+                  {saving ? (uploadProgress >= 0 ? `Uploading ${uploadProgress}%` : 'Creating...') : 'Create Case'}
                 </button>
               </div>
             </div>
@@ -868,15 +1035,25 @@ export default function CasesPage() {
               options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
               placeholder="Search client..."
             />
-            <div>
-              <label className="block text-sm font-medium mb-1">Assigned To</label>
-              <input
-                value={(() => { const u = users.find((u) => String(u.id) === editForm.assigned_to); return u ? `${u.first_name} ${u.last_name}`.trim() : editForm.assigned_to || ''; })()}
-                readOnly
-                className={`${inputClass} bg-gray-50 cursor-not-allowed`}
-                placeholder="Not assigned"
+            {canReassign ? (
+              <SearchableSelect
+                label="Assigned To"
+                value={editForm.assigned_to}
+                onChange={(v) => setEditForm((prev) => ({ ...prev, assigned_to: v }))}
+                options={[{ value: '', label: 'Not assigned' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+                placeholder="Search user..."
               />
-            </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium mb-1">Assigned To</label>
+                <input
+                  value={(() => { const u = users.find((u) => String(u.id) === editForm.assigned_to); return u ? `${u.first_name} ${u.last_name}`.trim() : editForm.assigned_to || ''; })()}
+                  readOnly
+                  className={`${inputClass} bg-gray-50 cursor-not-allowed`}
+                  placeholder="Not assigned"
+                />
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -908,7 +1085,7 @@ export default function CasesPage() {
               <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-muted mb-1">Name *</label>
+                  <label className="block text-xs text-muted mb-1">Name</label>
                   <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
                 </div>
                 <div>
@@ -926,7 +1103,7 @@ export default function CasesPage() {
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
-                <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setEditForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                <button type="button" disabled={savingOC || (!newOC.name.trim() && !newOC.firm.trim())} onClick={() => saveOpposingCounsel((id) => setEditForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
                   {savingOC ? 'Saving...' : 'Save & Select'}
                 </button>
               </div>
@@ -940,7 +1117,7 @@ export default function CasesPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Case Type</label>
+              <label className="block text-sm font-medium mb-2">Case Type *</label>
               <div className="flex gap-4">
                 {['Plaintiff', 'Defendant'].map((type) => (
                   <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
@@ -956,7 +1133,7 @@ export default function CasesPage() {
 
             {editForm.case_type === 'Plaintiff' && (
               <div>
-                <label className="block text-sm font-medium mb-2">Is this a recovery? *</label>
+                <label className="block text-sm font-medium mb-2">Is this a recovery?</label>
                 <div className="flex gap-4">
                   <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
                     <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
@@ -973,20 +1150,13 @@ export default function CasesPage() {
                     <span>No</span>
                   </label>
                 </div>
-                {editForm.is_recovery === null && <p className="text-xs text-danger mt-1">Please select Yes or No</p>}
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Our Reference</label>
-              <input value={editForm.our_reference} onChange={(e) => setEditForm({ ...editForm, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Station</label>
-              <input value={editForm.court} onChange={(e) => setEditForm({ ...editForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
-            </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Our Reference</label>
+            <input value={editForm.our_reference} onChange={(e) => setEditForm({ ...editForm, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
           </div>
 
           <div>
@@ -994,7 +1164,7 @@ export default function CasesPage() {
               <input
                 type="checkbox"
                 checked={editForm.is_filed_in_court}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '' }))}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '', court: e.target.checked ? prev.court : '', court_number_filed: e.target.checked ? prev.court_number_filed : '', judge: e.target.checked ? prev.judge : '' }))}
                 className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
               <span className="text-sm font-medium">Is the case filed in court?</span>
@@ -1002,10 +1172,26 @@ export default function CasesPage() {
           </div>
 
           {editForm.is_filed_in_court && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Case Number</label>
-                <input value={editForm.case_number} onChange={(e) => setEditForm({ ...editForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Station</label>
+                  <input value={editForm.court} onChange={(e) => setEditForm({ ...editForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Case Number</label>
+                  <input value={editForm.case_number} onChange={(e) => setEditForm({ ...editForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Before Court No</label>
+                  <input value={editForm.court_number_filed} onChange={(e) => setEditForm({ ...editForm, court_number_filed: e.target.value.toUpperCase() })} className={inputClass} placeholder="Before court no" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
+                  <input value={editForm.judge} onChange={(e) => setEditForm({ ...editForm, judge: e.target.value })} className={inputClass} placeholder="Magistrate or Judge name" />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Date Filed in Court</label>
@@ -1081,14 +1267,15 @@ export default function CasesPage() {
             >
               <option value="Bring Up">Bring Up</option>
               <option value="Mention">Mention</option>
+              <option value="Mention of Application">Mention of Application</option>
               <option value="Hearing">Hearing</option>
+              <option value="Hearing of Application">Hearing of Application</option>
               <option value="Ruling">Ruling</option>
               <option value="Judgement">Judgement</option>
-              <option value="Application">Application</option>
             </select>
           </div>
 
-          <DatePicker label="Event Date" value={eventForm.event_date} onChange={(v) => setEventForm({ ...eventForm, event_date: v })} />
+          <DatePicker blockHolidays label="Event Date" value={eventForm.event_date} onChange={(v) => setEventForm({ ...eventForm, event_date: v })} />
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <button type="button" onClick={() => { setShowEventModal(false); setEventCaseId(null); setError(''); }} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>

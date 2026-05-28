@@ -26,9 +26,24 @@ export default function Sidebar() {
     const items: Array<{ label: string; href: string }> = [];
     if (isOwner || can('case.view_all') || can('case.view_own') || can('case.view')) {
       items.push({ label: 'Cases', href: '/dashboard/cases' });
+      items.push({ label: 'Case Series', href: '/dashboard/series' });
     }
     if (isOwner || can('task.view_all') || can('task.view_own')) {
       items.push({ label: 'Tasks', href: '/dashboard/tasks' });
+    }
+    if (isOwner || can('case.view_all') || can('case.view_own') || can('case.view')) {
+      items.push({ label: 'Opposing Counsel', href: '/dashboard/opposing-counsel' });
+    }
+    return items;
+  }, [isOwner, can]);
+
+  const expenseChildren = useMemo(() => {
+    const items: Array<{ label: string; href: string }> = [];
+    if (isOwner || can('expense.view_all') || can('expense.view_own')) {
+      items.push({ label: 'Expenses', href: '/dashboard/expenses' });
+    }
+    if (isOwner || can('business_settings.access')) {
+      items.push({ label: 'Expense Categories', href: '/dashboard/settings/expense-categories' });
     }
     return items;
   }, [isOwner, can]);
@@ -45,23 +60,27 @@ export default function Sidebar() {
     if (umbrella || can('business_settings.case_settings')) {
       items.push({ label: 'Case Settings', href: '/dashboard/settings/cases' });
     }
+    if (umbrella) {
+      items.push({ label: 'Tax Rates', href: '/dashboard/settings/tax-rates' });
+    }
     return items;
   }, [isOwner, can]);
 
   const isCaseActive = caseChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
   const isUsersActive = usersChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
+  const isExpenseActive = expenseChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
   const isSettingsActive = settingsChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [caseOpen, setCaseOpen] = useState(isCaseActive);
   const [usersOpen, setUsersOpen] = useState(isUsersActive);
+  const [expenseOpen, setExpenseOpen] = useState(isExpenseActive);
   const [settingsOpen, setSettingsOpen] = useState(isSettingsActive);
 
-  // Re-sync open state on route changes so a section auto-collapses when you
-  // navigate away from it and auto-expands when you land on one of its pages.
   useEffect(() => {
     setCaseOpen(isCaseActive);
     setUsersOpen(isUsersActive);
+    setExpenseOpen(isExpenseActive);
     setSettingsOpen(isSettingsActive);
   }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -180,6 +199,47 @@ export default function Sidebar() {
           {caseOpen && (
             <div className="ml-3 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
               {caseChildren.map((child) => {
+                const childActive = pathname === child.href || pathname.startsWith(child.href + '/');
+                return (
+                  <Link
+                    key={child.href}
+                    href={child.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      childActive ? 'text-white bg-white/10' : 'text-sidebar-text/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <span>{child.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        )}
+
+        {expenseChildren.length > 0 && (
+        <div className="pt-1">
+          <button
+            onClick={() => setExpenseOpen(!expenseOpen)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              isExpenseActive ? 'bg-sidebar-active text-white' : 'text-sidebar-text hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <span className="flex-1 text-left">Expenses</span>
+            {expenseOpen && (
+              <svg className="w-3.5 h-3.5 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            )}
+          </button>
+
+          {expenseOpen && (
+            <div className="ml-3 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
+              {expenseChildren.map((child) => {
                 const childActive = pathname === child.href || pathname.startsWith(child.href + '/');
                 return (
                   <Link

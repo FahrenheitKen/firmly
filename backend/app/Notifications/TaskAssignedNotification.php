@@ -33,7 +33,7 @@ class TaskAssignedNotification extends Notification
 
     public function toMail($notifiable): MailMessage
     {
-        $url = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:3000')), '/') . '/dashboard/tasks';
+        $url = rtrim(config('app.frontend_url'), '/') . '/dashboard/tasks';
         $msg = (new MailMessage)
             ->subject("New task assigned: {$this->task->title}")
             ->greeting('Hi ' . $notifiable->first_name . ',')

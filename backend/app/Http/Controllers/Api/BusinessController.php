@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\CacheTenantGet;
 use App\Models\Business;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -98,6 +99,8 @@ class BusinessController extends Controller
         }
 
         $business->update($validated);
+
+        CacheTenantGet::flushTag('business', $request->user()->business_id);
 
         return response()->json(['business' => $business->fresh(['currency'])]);
     }

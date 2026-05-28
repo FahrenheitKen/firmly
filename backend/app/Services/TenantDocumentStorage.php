@@ -234,6 +234,70 @@ class TenantDocumentStorage
      * rule will expire it after the retention window. On local it's a
      * no-op — the GC cron handles purge via forceDelete().
      */
+    public function copyDocument(CaseDocument $doc, int $newCaseId, Business $business): array
+    {
+        $uuid = (string) Str::uuid();
+        $slug = $this->safeFilename($doc->original_name);
+
+        if ($doc->disk === 'local' && $doc->file_path) {
+            $newPath = "case-documents/{$newCaseId}/{$uuid}-{$slug}";
+            $stream = Storage::disk($this->localDisk)->readStream($doc->file_path);
+            try {
+                Storage::disk($this->localDisk)->writeStream($newPath, $stream);
+            } finally {
+                if (is_resource($stream)) fclose($stream);
+            }
+            return [
+                'disk'            => 'local',
+                'file_path'       => $newPath,
+                'storage_key'     => null,
+                'kms_key_id'      => null,
+                'etag'            => null,
+                'checksum_sha256' => $doc->checksum_sha256,
+                'file_size'       => $doc->file_size,
+                'mime_type'       => $doc->mime_type,
+            ];
+        }
+
+        if ($doc->disk === 's3' && $doc->storage_key) {
+            $s3 = $this->s3Client();
+            $bucket = $this->s3Bucket();
+            $newKey = "tenants/{$business->id}/cases/{$newCaseId}/documents/{$uuid}-{$slug}";
+            $kmsKeyId = $this->kmsAliasFor($business);
+
+            $obj = $s3->getObject(['Bucket' => $bucket, 'Key' => $doc->storage_key]);
+            $body = $obj['Body'];
+
+            $result = $s3->putObject([
+                'Bucket'                  => $bucket,
+                'Key'                     => $newKey,
+                'Body'                    => $body,
+                'ContentType'             => $doc->mime_type ?: 'application/octet-stream',
+                'ServerSideEncryption'    => 'aws:kms',
+                'SSEKMSKeyId'             => $kmsKeyId,
+                'SSEKMSEncryptionContext' => base64_encode(json_encode(['business_id' => (string) $business->id])),
+                'Metadata'                => [
+                    'business-id'     => (string) $business->id,
+                    'case-id'         => (string) $newCaseId,
+                    'checksum-sha256' => $doc->checksum_sha256 ?? '',
+                ],
+            ]);
+
+            return [
+                'disk'            => 's3',
+                'file_path'       => null,
+                'storage_key'     => $newKey,
+                'kms_key_id'      => $kmsKeyId,
+                'etag'            => trim((string) ($result['ETag'] ?? ''), '"'),
+                'checksum_sha256' => $doc->checksum_sha256,
+                'file_size'       => $doc->file_size,
+                'mime_type'       => $doc->mime_type,
+            ];
+        }
+
+        throw new RuntimeException("Cannot copy document {$doc->id}: unsupported disk {$doc->disk}");
+    }
+
     public function markForDeletion(CaseDocument $doc): void
     {
         if ($doc->disk !== 's3' || !$doc->storage_key) {

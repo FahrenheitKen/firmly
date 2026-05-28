@@ -3,18 +3,21 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useDateFormat, formatDate, dateFormatPlaceholder } from '@/lib/date';
+import { getKenyaHoliday } from '@/lib/kenya-holidays';
 
 interface Props {
   value: string;
   onChange: (value: string) => void;
   label?: string;
   placeholder?: string;
+  /** Disable Kenyan national public holidays — used for court event pickers. */
+  blockHolidays?: boolean;
 }
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export default function DatePicker({ value, onChange, label, placeholder }: Props) {
+export default function DatePicker({ value, onChange, label, placeholder, blockHolidays = false }: Props) {
   const dateFormat = useDateFormat();
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
@@ -62,7 +65,9 @@ export default function DatePicker({ value, onChange, label, placeholder }: Prop
   const selectDate = (day: number) => {
     const m = String(month + 1).padStart(2, '0');
     const d = String(day).padStart(2, '0');
-    onChange(`${year}-${m}-${d}`);
+    const dateStr = `${year}-${m}-${d}`;
+    if (blockHolidays && getKenyaHoliday(dateStr)) return;
+    onChange(dateStr);
     setOpen(false);
   };
 
@@ -134,14 +139,23 @@ export default function DatePicker({ value, onChange, label, placeholder }: Prop
                   const dateStr = `${year}-${m}-${d}`;
                   const isSelected = dateStr === value;
                   const isToday = dateStr === todayStr;
+                  const holidayName = getKenyaHoliday(dateStr);
+                  const isBlocked = blockHolidays && !!holidayName;
                   return (
                     <button
                       key={day}
                       type="button"
                       onClick={() => selectDate(day)}
+                      disabled={isBlocked}
+                      title={holidayName ? `Public Holiday: ${holidayName}` : undefined}
+                      aria-disabled={isBlocked}
                       className={`w-full aspect-square flex items-center justify-center text-sm rounded-xl transition-all ${
                         isSelected
                           ? 'bg-primary text-white font-medium shadow-sm'
+                          : isBlocked
+                          ? 'bg-rose-50 text-rose-400 line-through cursor-not-allowed'
+                          : holidayName
+                          ? 'text-rose-600 font-medium hover:bg-background'
                           : isToday
                           ? 'bg-background text-foreground font-medium'
                           : 'text-foreground/70 hover:bg-background'
@@ -155,7 +169,12 @@ export default function DatePicker({ value, onChange, label, placeholder }: Prop
 
               <div className="mt-3 pt-3 border-t border-border/50 flex justify-between">
                 <button type="button" onClick={() => { onChange(''); setOpen(false); }} className="text-xs text-muted hover:text-foreground transition-colors">Clear</button>
-                <button type="button" onClick={() => { onChange(todayStr); setOpen(false); }} className="text-xs text-foreground font-medium hover:text-muted transition-colors">Today</button>
+                <button
+                  type="button"
+                  disabled={blockHolidays && !!getKenyaHoliday(todayStr)}
+                  onClick={() => { onChange(todayStr); setOpen(false); }}
+                  className="text-xs text-foreground font-medium hover:text-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >Today</button>
               </div>
             </>
           ) : (

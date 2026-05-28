@@ -124,7 +124,7 @@ class EmailAccountController extends Controller
      */
     public function oauthCallback(Request $request, string $provider): RedirectResponse
     {
-        $frontendBase = config('app.frontend_url', 'http://localhost:3000') . '/dashboard/settings/email';
+        $frontendBase = rtrim(config('app.frontend_url'), '/') . '/dashboard/settings/email';
 
         $service = $this->providers[$provider] ?? null;
 

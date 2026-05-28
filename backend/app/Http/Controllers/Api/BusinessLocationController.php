@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\CacheTenantGet;
 use App\Models\BusinessLocation;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +26,8 @@ class BusinessLocationController extends Controller
         $businessId = $request->user()->business_id;
         $user = $request->user();
 
-        $query = BusinessLocation::where('business_id', $businessId);
+        $query = BusinessLocation::where('business_id', $businessId)
+            ->withCount(['users', 'clients', 'cases']);
 
         $permitted = $user->permittedLocations();
         $query->whereIn('id', $permitted);
@@ -75,6 +78,8 @@ class BusinessLocationController extends Controller
         ]);
         $request->user()->givePermissionTo($perm);
 
+        CacheTenantGet::flushTag('locations', $businessId);
+
         return response()->json([
             'location' => $location,
         ], 201);
@@ -123,6 +128,8 @@ class BusinessLocationController extends Controller
 
         $location->update($validated);
 
+        CacheTenantGet::flushTag('locations', $businessId);
+
         return response()->json([
             'location' => $location->fresh(),
         ]);
@@ -134,8 +141,28 @@ class BusinessLocationController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $location = BusinessLocation::where('business_id', $request->user()->business_id)->findOrFail($id);
+        $businessId = $request->user()->business_id;
+        $location = BusinessLocation::where('business_id', $businessId)->findOrFail($id);
+
+        $activeCount = BusinessLocation::where('business_id', $businessId)
+            ->where('is_active', true)
+            ->count();
+
+        if ($activeCount <= 1 && $location->is_active) {
+            return response()->json([
+                'message' => 'Cannot delete the last active location. Create another location first.',
+            ], 422);
+        }
+
+        $this->reassignUsersFromLocation($businessId, $id);
+
+        Permission::where('name', "location.{$id}")->delete();
+        app()->make(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+
         $location->delete();
+
+        CacheTenantGet::flushTag('locations', $businessId);
+
         return response()->json(['message' => 'Location deleted']);
     }
 
@@ -145,10 +172,43 @@ class BusinessLocationController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $location = BusinessLocation::where('business_id', $request->user()->business_id)->findOrFail($id);
-        $location->update(['is_active' => DB::raw('NOT is_active')]);
+        $businessId = $request->user()->business_id;
+        $location = BusinessLocation::where('business_id', $businessId)->findOrFail($id);
+
+        if ($location->is_active) {
+            $activeCount = BusinessLocation::where('business_id', $businessId)
+                ->where('is_active', true)
+                ->count();
+
+            if ($activeCount <= 1) {
+                return response()->json([
+                    'message' => 'Cannot deactivate the last active location.',
+                ], 422);
+            }
+
+            $this->reassignUsersFromLocation($businessId, $id);
+        }
+
+        $location->update(['is_active' => !$location->is_active]);
         $location->refresh();
+
+        CacheTenantGet::flushTag('locations', $businessId);
+
         return response()->json(['location' => $location]);
+    }
+
+    private function reassignUsersFromLocation(int $businessId, int $locationId): void
+    {
+        $fallback = BusinessLocation::where('business_id', $businessId)
+            ->where('id', '!=', $locationId)
+            ->where('is_active', true)
+            ->first();
+
+        $fallbackId = $fallback?->id;
+
+        User::where('business_id', $businessId)
+            ->where('active_location_id', $locationId)
+            ->update(['active_location_id' => $fallbackId]);
     }
 
     public function setActive(Request $request, int $id): JsonResponse

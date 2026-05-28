@@ -12,12 +12,13 @@ import Modal from '@/components/ui/modal';
 import SearchableSelect from '@/components/ui/searchable-select';
 import DatePicker from '@/components/ui/date-picker';
 import TaskDrawer from '@/components/tasks/task-drawer';
+import { getKenyaHoliday } from '@/lib/kenya-holidays';
 
 interface CaseEvent {
   id: number;
   event_type: string;
   event_date: string;
-  created_by: number;
+  created_by: number | { id: number; first_name: string; last_name: string };
   created_at: string;
 }
 
@@ -71,10 +72,14 @@ interface CaseItem {
   opposing_counsel_id: number | null;
   opposing_counsel?: OpposingCounsel | null;
   court: string | null;
+  court_number_filed: string | null;
   judge: string | null;
   filed_date: string | null;
   closed_date: string | null;
   outcome: string | null;
+  case_series_id: number | null;
+  series_suffix: string | null;
+  series?: { id: number; reference: string; name: string } | null;
   created_at: string;
 }
 
@@ -114,6 +119,7 @@ export default function CaseDetailPage() {
   const formatDate = useFormatDate();
   const canUpdate = can('case.update');
   const canDelete = can('case.delete');
+  const canReassign = can('case.reassign');
   const canCreateTask = can('task.create');
   const { toast: showToast } = useToast();
   const params = useParams();
@@ -131,12 +137,12 @@ export default function CaseDetailPage() {
     magistrate: '',
     instruction: '',
     directions: '',
-    time_spent: '',
     due_for_type: '',
     due_for_date: '',
     bring_up_date: '',
   });
   const [proceedingStep, setProceedingStep] = useState<1 | 2>(1);
+  const [editingProceedingId, setEditingProceedingId] = useState<number | null>(null);
   const [furtherActionForm, setFurtherActionForm] = useState({
     description: '',
     status: 'Pending' as 'Pending' | 'In Progress' | 'Completed' | 'Cancelled',
@@ -178,9 +184,11 @@ export default function CaseDetailPage() {
   const [editForm, setEditForm] = useState({
     title: '', client_id: '', client_reference: '', parties: '',
     our_reference: '', case_number: '', assigned_to: '', court: '',
+    court_number_filed: '', judge: '',
     opposing_counsel_id: '',
     filed_date: '', closed_date: '', outcome: '',
     is_recovery: null as boolean | null, case_type: 'Plaintiff',
+    is_filed_in_court: false,
     status: 'Open', priority: 'Medium',
   });
   const [opposingCounsels, setOpposingCounsels] = useState<OpposingCounsel[]>([]);
@@ -362,12 +370,15 @@ export default function CaseDetailPage() {
       case_number: c.case_number || '',
       assigned_to: c.assigned_to?.id ? String(c.assigned_to.id) : '',
       court: c.court || '',
+      court_number_filed: c.court_number_filed || '',
+      judge: c.judge || '',
       opposing_counsel_id: c.opposing_counsel_id ? String(c.opposing_counsel_id) : '',
       filed_date: c.filed_date ? c.filed_date.split('T')[0] : '',
       closed_date: c.closed_date ? c.closed_date.split('T')[0] : '',
       outcome: c.outcome || '',
       is_recovery: c.is_recovery ?? null,
       case_type: c.case_type || 'Plaintiff',
+      is_filed_in_court: Boolean(c.case_number) || Boolean(c.filed_date) || Boolean(c.court) || Boolean(c.court_number_filed) || Boolean(c.judge),
       status: c.status || 'Open',
       priority: c.priority || 'Medium',
     });
@@ -387,6 +398,12 @@ export default function CaseDetailPage() {
     if (!token || !caseItem) return;
     setEditSaving(true);
     setEditSaveStatus('idle');
+    const effectiveIsRecovery = editForm.case_type === 'Plaintiff' ? (editForm.is_recovery === true) : false;
+    const effectiveCaseNumber = editForm.is_filed_in_court ? editForm.case_number : '';
+    const effectiveFiledDate = editForm.is_filed_in_court ? editForm.filed_date : '';
+    const effectiveCourt = editForm.is_filed_in_court ? editForm.court : '';
+    const effectiveCourtNumberFiled = editForm.is_filed_in_court ? editForm.court_number_filed : '';
+    const effectiveJudge = editForm.is_filed_in_court ? editForm.judge : '';
     try {
       const res = await api.put<{ case: CaseItem }>(`/cases/${caseItem.id}`, {
         title: editForm.title,
@@ -394,14 +411,16 @@ export default function CaseDetailPage() {
         client_reference: editForm.client_reference || null,
         description: editForm.parties || null,
         our_reference: editForm.our_reference || null,
-        case_number: editForm.case_number || null,
         assigned_to: editForm.assigned_to || null,
-        court: editForm.court || null,
         opposing_counsel_id: editForm.opposing_counsel_id || null,
-        filed_date: editForm.filed_date || null,
+        case_number: effectiveCaseNumber || null,
+        court: effectiveCourt || null,
+        court_number_filed: effectiveCourtNumberFiled || null,
+        judge: effectiveJudge || null,
+        filed_date: effectiveFiledDate || null,
         closed_date: editForm.closed_date || null,
         outcome: editForm.outcome || null,
-        is_recovery: editForm.is_recovery,
+        is_recovery: effectiveIsRecovery,
         case_type: editForm.case_type,
         status: editForm.status,
         priority: editForm.priority,
@@ -437,12 +456,12 @@ export default function CaseDetailPage() {
   };
 
   const openProceedingModal = () => {
+    setEditingProceedingId(null);
     setProceedingForm({
-      before_court_no: '',
-      magistrate: '',
+      before_court_no: caseItem?.court_number_filed || '',
+      magistrate: caseItem?.judge || '',
       instruction: '',
       directions: '',
-      time_spent: '',
       due_for_type: '',
       due_for_date: '',
       bring_up_date: '',
@@ -465,41 +484,51 @@ export default function CaseDetailPage() {
       showToast('Pick a date for the next court event', 'error');
       return;
     }
-    if (proceedingForm.time_spent && !/^\d{1,2}:[0-5]\d$/.test(proceedingForm.time_spent)) {
-      showToast('Time spent must be HH:MM', 'error');
+    const bringUpHoliday = getKenyaHoliday(proceedingForm.bring_up_date);
+    if (bringUpHoliday) {
+      showToast(`Bring-up date falls on a public holiday (${bringUpHoliday})`, 'error');
+      return;
+    }
+    const dueForHoliday = getKenyaHoliday(proceedingForm.due_for_date);
+    if (dueForHoliday) {
+      showToast(`Next court event falls on a public holiday (${dueForHoliday})`, 'error');
       return;
     }
     setProceedingSaving(true);
+    const payload = {
+      before_court_no: proceedingForm.before_court_no || null,
+      magistrate: proceedingForm.magistrate || null,
+      instruction: proceedingForm.instruction || null,
+      directions: proceedingForm.directions || null,
+      due_for_type: proceedingForm.due_for_type || null,
+      due_for_date: proceedingForm.due_for_date || null,
+      bring_up_date: proceedingForm.bring_up_date || null,
+    };
     try {
-      await api.post(`/cases/${caseItem.id}/proceedings`, {
-        before_court_no: proceedingForm.before_court_no || null,
-        magistrate: proceedingForm.magistrate || null,
-        instruction: proceedingForm.instruction || null,
-        directions: proceedingForm.directions || null,
-        time_spent: proceedingForm.time_spent || null,
-        due_for_type: proceedingForm.due_for_type || null,
-        due_for_date: proceedingForm.due_for_date || null,
-        bring_up_date: proceedingForm.bring_up_date || null,
-      }, token);
-
-      // Optional: create a follow-up task if the user filled in the action
-      const actionDesc = furtherActionForm.description.trim();
-      if (actionDesc) {
-        try {
-          await api.post('/tasks', {
-            title: `Court proceeding follow-up — ${caseItem.case_number}`,
-            description: actionDesc,
-            status: furtherActionForm.status,
-            assigned_to: furtherActionForm.assigned_to ? Number(furtherActionForm.assigned_to) : null,
-            case_id: caseItem.id,
-            due_date: null,
-          }, token);
-          showToast('Proceeding recorded and task created', 'success');
-        } catch {
-          showToast('Proceeding saved but follow-up task failed', 'warning');
-        }
+      if (editingProceedingId) {
+        await api.put(`/cases/${caseItem.id}/proceedings/${editingProceedingId}`, payload, token);
+        showToast('Proceeding updated', 'success');
       } else {
-        showToast('Proceeding recorded', 'success');
+        await api.post(`/cases/${caseItem.id}/proceedings`, payload, token);
+
+        const actionDesc = furtherActionForm.description.trim();
+        if (actionDesc) {
+          try {
+            await api.post('/tasks', {
+              title: `Court proceeding follow-up — ${caseItem.case_number}`,
+              description: actionDesc,
+              status: furtherActionForm.status,
+              assigned_to: furtherActionForm.assigned_to ? Number(furtherActionForm.assigned_to) : null,
+              case_id: caseItem.id,
+              due_date: null,
+            }, token);
+            showToast('Proceeding recorded and task created', 'success');
+          } catch {
+            showToast('Proceeding saved but follow-up task failed', 'warning');
+          }
+        } else {
+          showToast('Proceeding recorded', 'success');
+        }
       }
 
       setShowProceedingModal(false);
@@ -527,6 +556,21 @@ export default function CaseDetailPage() {
     }
   };
 
+  const openEditProceeding = (p: CourtProceeding) => {
+    setEditingProceedingId(p.id);
+    setProceedingForm({
+      before_court_no: p.before_court_no || '',
+      magistrate: p.magistrate || '',
+      instruction: p.instruction || '',
+      directions: p.directions || '',
+      due_for_type: p.due_for_event?.event_type || '',
+      due_for_date: p.due_for_event?.event_date ? p.due_for_event.event_date.split('T')[0] : '',
+      bring_up_date: p.bring_up_event?.event_date ? p.bring_up_event.event_date.split('T')[0] : '',
+    });
+    setProceedingStep(1);
+    setShowProceedingModal(true);
+  };
+
   const openCreateEvent = () => {
     setEditingEventId(null);
     setEventForm({ event_type: 'Mention', event_date: '' });
@@ -542,6 +586,11 @@ export default function CaseDetailPage() {
   const submitEventForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !caseItem) return;
+    const holiday = getKenyaHoliday(eventForm.event_date);
+    if (holiday) {
+      showToast(`Cannot schedule on a public holiday (${holiday})`, 'error');
+      return;
+    }
     setEventSaving(true);
     try {
       if (editingEventId === null) {
@@ -684,19 +733,19 @@ export default function CaseDetailPage() {
             <p className="text-sm text-muted">{caseItem.case_number}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {canUpdate && (
-            <button onClick={openEditModal} className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-gray-50 transition-colors">
+            <button onClick={openEditModal} className="px-3 sm:px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-gray-50 transition-colors">
               Edit
             </button>
           )}
           {canCreateTask && (
-            <button onClick={openCreateTask} className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors">
+            <button onClick={openCreateTask} className="px-3 sm:px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors">
               Add Task
             </button>
           )}
           {canDelete && (
-            <button onClick={deleteCase} className="px-4 py-2 text-sm font-medium text-danger border border-danger/20 rounded-lg hover:bg-danger/5 transition-colors">
+            <button onClick={deleteCase} className="px-3 sm:px-4 py-2 text-sm font-medium text-danger border border-danger/20 rounded-lg hover:bg-danger/5 transition-colors">
               Delete
             </button>
           )}
@@ -716,12 +765,24 @@ export default function CaseDetailPage() {
               <p className="text-sm mt-0.5">{caseItem.client_reference || '-'}</p>
             </div>
             <div>
-              <p className="text-xs text-muted font-medium uppercase tracking-wider">Filed Date</p>
-              <p className="text-sm mt-0.5">{formatDate(caseItem.filed_date)}</p>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Case Number</p>
+              <p className="text-sm mt-0.5">{caseItem.case_number || '-'}</p>
             </div>
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Station</p>
               <p className="text-sm mt-0.5">{caseItem.court || '-'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Filed Date</p>
+              <p className="text-sm mt-0.5">{formatDate(caseItem.filed_date)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Before Court No</p>
+              <p className="text-sm mt-0.5">{caseItem.court_number_filed || '-'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Magistrate/Judge</p>
+              <p className="text-sm mt-0.5">{caseItem.judge || '-'}</p>
             </div>
           </div>
           {caseItem.opposing_counsel && (
@@ -786,22 +847,34 @@ export default function CaseDetailPage() {
         </div>
       </div>
 
-      <div className="bg-card-bg rounded-xl border border-border p-6 mt-5">
-        <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+      {caseItem.series && (
+        <div className="mt-5 flex items-center gap-3 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl">
+          <svg className="w-5 h-5 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Part of series <Link href={`/dashboard/series/${caseItem.series.id}`} className="text-primary hover:underline font-mono">{caseItem.series.reference}</Link></p>
+            <p className="text-xs text-muted">{caseItem.series.name} {caseItem.series_suffix ? `(Suffix: ${caseItem.series_suffix})` : ''}</p>
+          </div>
+          <Link href={`/dashboard/series/${caseItem.series.id}`} className="text-xs font-medium px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shrink-0">View Series</Link>
+        </div>
+      )}
+
+      <div className="bg-card-bg rounded-xl border border-border p-4 sm:p-6 mt-5">
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
           {([
-            { key: 'files', label: 'Files' },
-            { key: 'tasks', label: 'Tasks' },
-            { key: 'court_directions', label: 'Court Proceedings' },
-            { key: 'activities', label: 'Events' },
+            { key: 'files', label: 'Files', shortLabel: 'Files' },
+            { key: 'tasks', label: 'Tasks', shortLabel: 'Tasks' },
+            { key: 'court_directions', label: 'Court Proceedings', shortLabel: 'Court' },
+            { key: 'activities', label: 'Events', shortLabel: 'Events' },
           ] as const).map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              className={`flex-1 px-2 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                 tab === t.key ? 'bg-white text-foreground shadow-sm' : 'text-muted hover:text-foreground'
               }`}
             >
-              {t.label}
+              <span className="sm:hidden">{t.shortLabel}</span>
+              <span className="hidden sm:inline">{t.label}</span>
             </button>
           ))}
         </div>
@@ -851,10 +924,15 @@ export default function CaseDetailPage() {
                     <div className="pb-6 flex-1 flex items-start justify-between gap-3">
                       <div>
                         <p className={`text-sm font-medium ${step.done ? 'text-foreground' : 'text-muted'}`}>{step.label}</p>
-                        <p className="text-xs text-muted mt-0.5">{step.date ? formatDate(step.date) : 'Pending'}</p>
+                        <p className="text-xs text-muted mt-0.5">
+                          {step.date ? formatDate(step.date) : 'Pending'}
+                          {step.event?.created_by && typeof step.event.created_by === 'object' && (
+                            <span> &middot; Added by {step.event.created_by.first_name} {step.event.created_by.last_name || ''}</span>
+                          )}
+                        </p>
                       </div>
                       {step.event && canUpdate && (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <button
                             type="button"
                             onClick={() => openEditEvent(step.event!)}
@@ -944,7 +1022,7 @@ export default function CaseDetailPage() {
                             {formatFileSize(doc.file_size)}{uploader ? ` · ${uploader.first_name} ${uploader.last_name}` : ''}{doc.document_date ? ` · ${formatDate(doc.document_date)}` : ` · ${formatDate(doc.created_at)}`}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <button onClick={() => viewDocument(doc.id, doc.original_name)} className="p-1.5 text-accent hover:bg-accent/5 rounded-lg transition-colors" title="View">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                           </button>
@@ -1059,13 +1137,22 @@ export default function CaseDetailPage() {
                           </td>
                           {canUpdate && (
                             <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => deleteProceeding(p.id)}
-                                className="opacity-0 group-hover:opacity-100 p-1.5 text-danger hover:bg-danger/5 rounded-lg transition-all"
-                                title="Delete"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                              </button>
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => openEditProceeding(p)}
+                                  className="sm:opacity-0 sm:group-hover:opacity-100 p-1.5 text-accent hover:bg-accent/5 rounded-lg transition-all"
+                                  title="Edit"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                </button>
+                                <button
+                                  onClick={() => deleteProceeding(p.id)}
+                                  className="sm:opacity-0 sm:group-hover:opacity-100 p-1.5 text-danger hover:bg-danger/5 rounded-lg transition-all"
+                                  title="Delete"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                              </div>
                             </td>
                           )}
                         </tr>
@@ -1173,9 +1260,8 @@ export default function CaseDetailPage() {
       <Modal open={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Case" size="lg">
         {(() => {
           const inputClass = 'w-full px-3.5 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary focus:ring-0 text-sm transition-colors';
-          const assignedUser = users.find((u) => String(u.id) === editForm.assigned_to);
           return (
-            <form onSubmit={handleEditSubmit} className="space-y-5">
+            <form onSubmit={handleEditSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Subject *</label>
                 <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value.toUpperCase() })} required className={inputClass} placeholder="Case subject" />
@@ -1189,68 +1275,80 @@ export default function CaseDetailPage() {
                   options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
                   placeholder="Search client..."
                 />
+                {canReassign ? (
+                  <SearchableSelect
+                    label="Assigned To"
+                    value={editForm.assigned_to}
+                    onChange={(v) => setEditForm((prev) => ({ ...prev, assigned_to: v }))}
+                    options={[{ value: '', label: 'Not assigned' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+                    placeholder="Search user..."
+                  />
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Assigned To</label>
+                    <input
+                      value={(() => { const u = users.find((u) => String(u.id) === editForm.assigned_to); return u ? `${u.first_name} ${u.last_name}`.trim() : editForm.assigned_to || ''; })()}
+                      readOnly
+                      className={`${inputClass} bg-gray-50 cursor-not-allowed`}
+                      placeholder="Not assigned"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Assigned To</label>
-                  <input
-                    value={assignedUser ? `${assignedUser.first_name} ${assignedUser.last_name}`.trim() : editForm.assigned_to || ''}
-                    readOnly
-                    className={`${inputClass} bg-gray-50 cursor-not-allowed`}
-                    placeholder="Not assigned"
+                  <label className="block text-sm font-medium mb-1">Client Reference</label>
+                  <input value={editForm.client_reference} onChange={(e) => setEditForm({ ...editForm, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium">Opposing Counsel</label>
+                    {!showAddOC && (
+                      <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+                    )}
+                  </div>
+                  <SearchableSelect
+                    value={editForm.opposing_counsel_id}
+                    onChange={(v) => setEditForm({ ...editForm, opposing_counsel_id: v })}
+                    options={[
+                      { value: '', label: 'Select opposing counsel' },
+                      ...opposingCounsels.map((oc) => ({ value: String(oc.id), label: oc.firm || oc.name })),
+                    ]}
+                    placeholder="Search opposing counsel..."
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1">Client Reference</label>
-                <input value={editForm.client_reference} onChange={(e) => setEditForm({ ...editForm, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium">Opposing Counsel</label>
-                  {!showAddOC && (
-                    <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
-                  )}
-                </div>
-                <SearchableSelect
-                  value={editForm.opposing_counsel_id}
-                  onChange={(v) => setEditForm({ ...editForm, opposing_counsel_id: v })}
-                  options={[
-                    { value: '', label: 'Select opposing counsel' },
-                    ...opposingCounsels.map((oc) => ({ value: String(oc.id), label: oc.firm || oc.name })),
-                  ]}
-                  placeholder="Search opposing counsel..."
-                />
-                {showAddOC && (
-                  <div className="mt-3 p-4 bg-gray-50 border border-border rounded-xl space-y-3">
-                    <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-muted mb-1">Name *</label>
-                        <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-muted mb-1">Firm</label>
-                        <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-muted mb-1">Phone</label>
-                        <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-muted mb-1">Email</label>
-                        <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
-                      </div>
+              {showAddOC && (
+                <div className="p-4 bg-gray-50 border border-border rounded-xl space-y-3">
+                  <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Name</label>
+                      <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
                     </div>
-                    <div className="flex justify-end gap-2">
-                      <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
-                      <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setEditForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
-                        {savingOC ? 'Saving...' : 'Save & Select'}
-                      </button>
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Firm</label>
+                      <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Phone</label>
+                      <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Email</label>
+                      <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
                     </div>
                   </div>
-                )}
-              </div>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
+                    <button type="button" disabled={savingOC || !newOC.name.trim()} onClick={() => saveOpposingCounsel((id) => setEditForm((prev) => ({ ...prev, opposing_counsel_id: id })))} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                      {savingOC ? 'Saving...' : 'Save & Select'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium mb-1">Parties</label>
@@ -1259,55 +1357,88 @@ export default function CaseDetailPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Is this a recovery?</label>
-                  <div className="flex gap-4">
-                    {[{ label: 'Yes', value: true }, { label: 'No', value: false }].map(({ label, value }) => (
-                      <label key={label} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === value ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
-                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === value ? 'border-primary' : 'border-gray-300'}`}>
-                          {editForm.is_recovery === value && <div className="w-2 h-2 rounded-full bg-primary" />}
-                          <input type="radio" name="edit_is_recovery" checked={editForm.is_recovery === value} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: value }))} className="absolute opacity-0" />
-                        </div>
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">Case Type</label>
+                  <label className="block text-sm font-medium mb-2">Case Type *</label>
                   <div className="flex gap-4">
                     {['Plaintiff', 'Defendant'].map((type) => (
                       <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.case_type === type ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.case_type === type ? 'border-primary' : 'border-gray-300'}`}>
                           {editForm.case_type === type && <div className="w-2 h-2 rounded-full bg-primary" />}
-                          <input type="radio" name="edit_case_type" checked={editForm.case_type === type} onChange={() => setEditForm((prev) => ({ ...prev, case_type: type }))} className="absolute opacity-0" />
+                          <input type="radio" name="detail_edit_case_type" checked={editForm.case_type === type} onChange={() => setEditForm((prev) => ({ ...prev, case_type: type, is_recovery: type === 'Plaintiff' ? prev.is_recovery : false }))} className="absolute opacity-0" />
                         </div>
                         <span>{type}</span>
                       </label>
                     ))}
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Our Reference</label>
-                  <input value={editForm.our_reference} readOnly className={`${inputClass} bg-gray-50 cursor-not-allowed`} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Case Number</label>
-                  <input value={editForm.case_number} onChange={(e) => setEditForm({ ...editForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
-                </div>
+                {editForm.case_type === 'Plaintiff' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Is this a recovery?</label>
+                    <div className="flex gap-4">
+                      <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === true ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === true ? 'border-primary' : 'border-gray-300'}`}>
+                          {editForm.is_recovery === true && <div className="w-2 h-2 rounded-full bg-primary" />}
+                          <input type="radio" name="detail_edit_recovery" checked={editForm.is_recovery === true} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: true }))} className="absolute opacity-0" />
+                        </div>
+                        <span>Yes</span>
+                      </label>
+                      <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all text-sm ${editForm.is_recovery === false ? 'bg-primary/5 border-primary/30' : 'border-border hover:bg-gray-50'}`}>
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${editForm.is_recovery === false ? 'border-primary' : 'border-gray-300'}`}>
+                          {editForm.is_recovery === false && <div className="w-2 h-2 rounded-full bg-primary" />}
+                          <input type="radio" name="detail_edit_recovery" checked={editForm.is_recovery === false} onChange={() => setEditForm((prev) => ({ ...prev, is_recovery: false }))} className="absolute opacity-0" />
+                        </div>
+                        <span>No</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Station</label>
-                <input value={editForm.court} onChange={(e) => setEditForm({ ...editForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
+                <label className="block text-sm font-medium mb-1">Our Reference</label>
+                <input value={editForm.our_reference} onChange={(e) => setEditForm({ ...editForm, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Filed Date</label>
-                <DatePicker value={editForm.filed_date} onChange={(v) => setEditForm({ ...editForm, filed_date: v })} />
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_filed_in_court}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, is_filed_in_court: e.target.checked, case_number: e.target.checked ? prev.case_number : '', filed_date: e.target.checked ? prev.filed_date : '', court: e.target.checked ? prev.court : '', court_number_filed: e.target.checked ? prev.court_number_filed : '', judge: e.target.checked ? prev.judge : '' }))}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-sm font-medium">Is the case filed in court?</span>
+                </label>
               </div>
+
+              {editForm.is_filed_in_court && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Station</label>
+                      <input value={editForm.court} onChange={(e) => setEditForm({ ...editForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Case Number</label>
+                      <input value={editForm.case_number} onChange={(e) => setEditForm({ ...editForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case number" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Before Court No</label>
+                      <input value={editForm.court_number_filed} onChange={(e) => setEditForm({ ...editForm, court_number_filed: e.target.value.toUpperCase() })} className={inputClass} placeholder="Before court no" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
+                      <input value={editForm.judge} onChange={(e) => setEditForm({ ...editForm, judge: e.target.value })} className={inputClass} placeholder="Magistrate or Judge name" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Date Filed in Court</label>
+                    <DatePicker value={editForm.filed_date} onChange={(v) => setEditForm({ ...editForm, filed_date: v })} />
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4 border-t border-border">
                 <button type="button" onClick={() => setShowEditModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
@@ -1338,7 +1469,7 @@ export default function CaseDetailPage() {
         })()}
       </Modal>
 
-      <Modal open={showProceedingModal} onClose={() => setShowProceedingModal(false)} title="Add Court Proceeding" size="lg">
+      <Modal open={showProceedingModal} onClose={() => setShowProceedingModal(false)} title={editingProceedingId ? 'Edit Court Proceeding' : 'Add Court Proceeding'} size="lg">
         {(() => {
           const inputClass = 'w-full px-3.5 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary focus:ring-0 text-sm transition-colors';
           const steps: { n: 1 | 2; label: string }[] = [
@@ -1370,8 +1501,9 @@ export default function CaseDetailPage() {
                       <label className="block text-sm font-medium mb-1">Before Court No</label>
                       <input
                         value={proceedingForm.before_court_no}
+                        readOnly={!!caseItem?.court_number_filed}
                         onChange={(e) => setProceedingForm({ ...proceedingForm, before_court_no: e.target.value })}
-                        className={inputClass}
+                        className={`${inputClass}${caseItem?.court_number_filed ? ' bg-gray-50 cursor-not-allowed' : ''}`}
                         placeholder="e.g. Court 5"
                       />
                     </div>
@@ -1379,8 +1511,9 @@ export default function CaseDetailPage() {
                       <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
                       <input
                         value={proceedingForm.magistrate}
+                        readOnly={!!caseItem?.judge}
                         onChange={(e) => setProceedingForm({ ...proceedingForm, magistrate: e.target.value })}
-                        className={inputClass}
+                        className={`${inputClass}${caseItem?.judge ? ' bg-gray-50 cursor-not-allowed' : ''}`}
                         placeholder="Name of the magistrate or judge"
                       />
                     </div>
@@ -1408,23 +1541,13 @@ export default function CaseDetailPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Time Spent in Court</label>
-                      <input
-                        type="time"
-                        value={proceedingForm.time_spent}
-                        onChange={(e) => setProceedingForm({ ...proceedingForm, time_spent: e.target.value })}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Bring Up Date</label>
-                      <DatePicker
-                        value={proceedingForm.bring_up_date}
-                        onChange={(v) => setProceedingForm({ ...proceedingForm, bring_up_date: v })}
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Bring Up Date</label>
+                    <DatePicker
+                      blockHolidays
+                      value={proceedingForm.bring_up_date}
+                      onChange={(v) => setProceedingForm({ ...proceedingForm, bring_up_date: v })}
+                    />
                   </div>
 
                   <div className="pt-3 border-t border-border">
@@ -1445,8 +1568,10 @@ export default function CaseDetailPage() {
                           className={inputClass}
                         >
                           <option value="">Select event type</option>
-                          <option value="Hearing">Hearing</option>
                           <option value="Mention">Mention</option>
+                          <option value="Mention of Application">Mention of Application</option>
+                          <option value="Hearing">Hearing</option>
+                          <option value="Hearing of Application">Hearing of Application</option>
                           <option value="Ruling">Ruling</option>
                           <option value="Judgement">Judgement</option>
                         </select>
@@ -1455,6 +1580,7 @@ export default function CaseDetailPage() {
                         <div>
                           <label className="block text-sm font-medium mb-1">Date</label>
                           <DatePicker
+                            blockHolidays
                             value={proceedingForm.due_for_date}
                             onChange={(v) => setProceedingForm({ ...proceedingForm, due_for_date: v })}
                           />
@@ -1535,7 +1661,7 @@ export default function CaseDetailPage() {
                     >
                       {proceedingSaving ? (
                         <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                      ) : 'Save Proceeding'}
+                      ) : editingProceedingId ? 'Update Proceeding' : 'Save Proceeding'}
                     </button>
                   </>
                 )}
@@ -1692,7 +1818,9 @@ export default function CaseDetailPage() {
             >
               <option value="Bring Up">Bring Up</option>
               <option value="Mention">Mention</option>
+              <option value="Mention of Application">Mention of Application</option>
               <option value="Hearing">Hearing</option>
+              <option value="Hearing of Application">Hearing of Application</option>
               <option value="Ruling">Ruling</option>
               <option value="Judgement">Judgement</option>
             </select>
@@ -1700,6 +1828,7 @@ export default function CaseDetailPage() {
           <div>
             <label className="block text-sm font-medium mb-1">Event Date</label>
             <DatePicker
+              blockHolidays
               value={eventForm.event_date}
               onChange={(v) => setEventForm((f) => ({ ...f, event_date: v }))}
             />

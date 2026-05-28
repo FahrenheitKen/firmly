@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\CacheTenantGet;
 use App\Models\BusinessLocation;
 use App\Models\User;
+use App\Notifications\WelcomeUserNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -26,7 +29,13 @@ class UserManagementController extends Controller
                       ->orWhereHas('permissions', fn($p) => $p->where('name', "location.{$activeLocationId}"));
                 });
             })
-            ->paginate(min((int) $request->query('per_page', 20), 500));
+            ->when($request->search, fn($q, $s) => $q->where(function ($q) use ($s) {
+                $q->where('first_name', 'like', "%{$s}%")
+                  ->orWhere('last_name', 'like', "%{$s}%")
+                  ->orWhere('email', 'like', "%{$s}%");
+            }))
+            ->orderBy('created_at', 'desc')
+            ->paginate(min((int) $request->query('per_page', 25), 500));
 
         $items = collect($users->items())->map(function (User $u) {
             $data = $u->toArray();
@@ -73,7 +82,6 @@ class UserManagementController extends Controller
             'first_name' => 'required|string|max:255',
             'last_name' => 'nullable|string|max:255',
             'email' => 'required|email|unique:users',
-            'password' => 'required|string|min:8',
             'role_id' => 'required|exists:roles,id,guard_name,web',
             'allow_login' => 'nullable|boolean',
             'contact_no' => 'nullable|string|max:20',
@@ -111,13 +119,16 @@ class UserManagementController extends Controller
         $locationPerms = $validated['location_permissions'] ?? null;
         unset($validated['role_id'], $validated['location_permissions']);
 
+        $temporaryPassword = Str::random(10);
+
         $user = User::create([
             'user_type' => 'user',
             'surname' => $validated['surname'] ?? null,
             'first_name' => $validated['first_name'],
             'last_name' => $validated['last_name'] ?? null,
             'email' => $validated['email'],
-            'password' => $validated['password'],
+            'password' => $temporaryPassword,
+            'must_change_password' => true,
             'business_id' => $businessId,
             'allow_login' => $validated['allow_login'] ?? true,
             'contact_no' => $validated['contact_no'] ?? null,
@@ -160,6 +171,9 @@ class UserManagementController extends Controller
             $this->assignLocationPermissions($user, $validLocations);
             $user->update(['active_location_id' => $validLocations[0]]);
         }
+
+        $businessName = $request->user()->business->name ?? 'Firmly';
+        $user->notify(new WelcomeUserNotification($temporaryPassword, $businessName));
 
         return response()->json([
             'user' => $user->load('roles'),
@@ -399,6 +413,8 @@ class UserManagementController extends Controller
             $role->syncPermissions($perms);
         }
 
+        CacheTenantGet::flushTag('roles', $businessId);
+
         return response()->json([
             'role' => [
                 'id' => $role->id,
@@ -439,6 +455,8 @@ class UserManagementController extends Controller
 
         $role->syncPermissions($perms);
 
+        CacheTenantGet::flushTag('roles', $businessId);
+
         return response()->json([
             'role' => [
                 'id' => $role->id,
@@ -472,6 +490,9 @@ class UserManagementController extends Controller
         }
 
         $role->delete();
+
+        CacheTenantGet::flushTag('roles', $businessId);
+
         return response()->json(['message' => 'Role deleted']);
     }
 
@@ -482,12 +503,11 @@ class UserManagementController extends Controller
                 'business_settings.access',
                 'business_settings.general', 'business_settings.firm_branches', 'business_settings.case_settings',
                 'user.view', 'user.create', 'user.update', 'user.delete',
-                'case.view_own', 'case.view_all', 'case.create', 'case.update', 'case.delete',
-            'client.create', 'client.update', 'client.delete',
+                'case.view_own', 'case.view_all', 'case.create', 'case.update', 'case.delete', 'case.reassign',
+                'client.create', 'client.update', 'client.delete',
                 'task.view_own', 'task.view_all', 'task.create', 'task.update', 'task.delete',
-                'product.view', 'product.create', 'product.update', 'product.delete',
-                'purchase.view', 'purchase.create', 'purchase.update', 'purchase.delete',
-                'sell.view', 'sell.create', 'sell.update', 'sell.delete',
+                'expense.view_own', 'expense.view_all', 'expense.create', 'expense.update', 'expense.delete', 'expense.approve',
+                'expense_report.view',
             ],
         ]);
     }

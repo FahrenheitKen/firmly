@@ -54,7 +54,7 @@ class CaseDocumentController extends Controller
 
         $request->validate([
             'documents' => 'required|array|min:1',
-            'documents.*' => 'file|max:10240|mimes:pdf,jpg,jpeg,png,gif,doc,docx,xls,xlsx',
+            'documents.*' => 'file|max:65536|mimes:pdf,jpg,jpeg,png,gif,doc,docx,xls,xlsx',
             'document_names' => 'nullable|array',
             'document_names.*' => 'nullable|string|max:255',
             'document_date' => 'nullable|date',

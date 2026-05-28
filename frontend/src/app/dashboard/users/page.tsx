@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
 import DatePicker from '@/components/ui/date-picker';
+import TablePagination from '@/components/ui/table-pagination';
 import ConfirmDialog from '@/components/ui/confirm-dialog';
 import { useToast } from '@/lib/toast-context';
 
@@ -44,6 +45,10 @@ export default function UsersPage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(25);
+  const [pagination, setPagination] = useState({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -56,12 +61,18 @@ export default function UsersPage() {
 
   const fetchData = async () => {
     if (!token) return;
+    setLoading(true);
     try {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      params.set('page', String(page));
+      params.set('per_page', String(perPage));
       const [usersRes, rolesRes] = await Promise.all([
-        api.get<{ users: UserItem[] }>('/users', token),
+        api.get<{ users: UserItem[]; pagination: typeof pagination }>(`/users?${params}`, token),
         api.get<{ roles: Role[] }>('/roles', token),
       ]);
       setUsers(usersRes.users);
+      if (usersRes.pagination) setPagination(usersRes.pagination);
       setRoles(rolesRes.roles);
     } catch (err: unknown) {
       const e = err as { message?: string };
@@ -71,7 +82,10 @@ export default function UsersPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, [token, user?.active_location?.id]); // eslint-disable-line
+  useEffect(() => {
+    const timer = setTimeout(fetchData, 300);
+    return () => clearTimeout(timer);
+  }, [token, user?.active_location?.id, search, page, perPage]); // eslint-disable-line
 
   const openEdit = async (userId: number) => {
     try {
@@ -145,48 +159,78 @@ export default function UsersPage() {
         </div>
       )}
 
+      {!loading && (
+        <div className="mb-4 relative max-w-md">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" /></svg>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search by name, email, role, or phone..."
+            className="w-full pl-9 pr-9 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-sm bg-card-bg"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setPage(1); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              aria-label="Clear search"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" /></div>
       ) : (
-        <div className="bg-card-bg rounded-xl border border-border overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="bg-card-bg rounded-xl border border-border overflow-visible">
+          <table className="w-full text-sm table-fixed sm:table-auto">
             <thead>
               <tr className="border-b border-border bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium">Name</th>
-                <th className="text-left px-4 py-3 font-medium">Email</th>
-                <th className="text-left px-4 py-3 font-medium">Role</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-                <th className="text-right px-4 py-3 font-medium">Actions</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium">Name</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium hidden sm:table-cell">Email</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium hidden md:table-cell">Role</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium w-16 sm:w-auto">Status</th>
+                <th className="text-right px-2 sm:px-4 py-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
+              {users.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-gray-500 text-sm">
+                    {search ? 'No users match your search.' : 'No users found.'}
+                  </td>
+                </tr>
+              )}
               {users.map((u) => (
                 <tr key={u.id} className="border-b border-border last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{u.full_name}</div>
+                  <td className="px-2 sm:px-4 py-3">
+                    <div className="font-medium truncate">{u.full_name}</div>
                   </td>
-                  <td className="px-4 py-3">{u.email || '-'}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 sm:px-4 py-3 hidden sm:table-cell">{u.email || '-'}</td>
+                  <td className="px-2 sm:px-4 py-3 hidden md:table-cell">
                     <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full">{u.role}</span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 text-xs rounded-full ${u.allow_login ? 'bg-green-100 text-success' : 'bg-red-100 text-danger'}`}>
+                  <td className="px-2 sm:px-4 py-3">
+                    <span className={`px-1.5 sm:px-2 py-0.5 text-xs rounded-full whitespace-nowrap ${u.allow_login ? 'bg-green-100 text-success' : 'bg-red-100 text-danger'}`}>
                       {u.allow_login ? 'Active' : 'Disabled'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex gap-1.5 justify-end">
-                      <Link href={`/dashboard/users/${u.id}`} className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 hover:border-primary/30 transition-all text-primary shadow-sm">
+                  <td className="px-2 sm:px-4 py-3 text-right">
+                    <div className="flex gap-1 sm:gap-1.5 justify-end">
+                      <Link href={`/dashboard/users/${u.id}`} className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 sm:px-2.5 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 hover:border-primary/30 transition-all text-primary shadow-sm">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                        View
+                        <span className="hidden sm:inline">View</span>
                       </Link>
-                      <button onClick={() => openEdit(u.id)} className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 bg-accent/10 border border-accent/20 rounded-lg hover:bg-accent/20 hover:border-accent/30 transition-all text-accent shadow-sm">
+                      <button onClick={() => openEdit(u.id)} className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 sm:px-2.5 bg-accent/10 border border-accent/20 rounded-lg hover:bg-accent/20 hover:border-accent/30 transition-all text-accent shadow-sm">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        Edit
+                        <span className="hidden sm:inline">Edit</span>
                       </button>
-                      <button onClick={() => setDeleteTarget(u.id)} className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 bg-danger/5 border border-danger/20 rounded-lg hover:bg-danger/10 hover:border-danger/30 transition-all text-danger shadow-sm">
+                      <button onClick={() => setDeleteTarget(u.id)} className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 sm:px-2.5 bg-danger/5 border border-danger/20 rounded-lg hover:bg-danger/10 hover:border-danger/30 transition-all text-danger shadow-sm">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        Delete
+                        <span className="hidden sm:inline">Delete</span>
                       </button>
                     </div>
                   </td>
@@ -194,6 +238,14 @@ export default function UsersPage() {
               ))}
             </tbody>
           </table>
+          <TablePagination
+            currentPage={pagination.current_page}
+            lastPage={pagination.last_page}
+            perPage={pagination.per_page}
+            total={pagination.total}
+            onPageChange={(p) => setPage(p)}
+            onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          />
         </div>
       )}
 

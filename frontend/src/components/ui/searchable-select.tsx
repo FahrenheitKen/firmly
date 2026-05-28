@@ -55,7 +55,7 @@ export default function SearchableSelect({ label, value, onChange, options, plac
 
   return (
     <div ref={wrapperRef} className="relative">
-      {label && <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-1.5">{label}</label>}
+      {label && <label className="block text-sm font-medium mb-1">{label}</label>}
       <button
         ref={buttonRef}
         type="button"

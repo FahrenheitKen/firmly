@@ -8,6 +8,7 @@ use App\Models\Cases;
 use App\Models\CaseDocument;
 use App\Models\Client;
 use App\Models\User;
+use App\Jobs\ConvertCaseDocumentToPdf;
 use App\Notifications\CaseAssignedNotification;
 use App\Services\TenantDocumentStorage;
 use Illuminate\Http\JsonResponse;
@@ -31,6 +32,7 @@ class CaseController extends Controller
             ->when($user->restrictedToOwnCases(), fn($q) => $q->where('assigned_to', $user->id))
             ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'opposingCounsel:id,name,firm'])
             ->when($request->client_id, fn($q, $cid) => $q->where('client_id', $cid))
+            ->when($request->assigned_to, fn($q, $uid) => $q->where('assigned_to', $uid))
             ->when($request->search, fn($q, $s) => $q->where(function ($q) use ($s) {
                 $q->where('title', 'like', "%{$s}%")
                   ->orWhere('case_number', 'like', "%{$s}%")
@@ -38,7 +40,7 @@ class CaseController extends Controller
                   ->orWhere('status', 'like', "%{$s}%");
             }))
             ->orderBy('created_at', 'desc')
-            ->paginate(min((int) $request->query('per_page', 20), 500));
+            ->paginate(min((int) $request->query('per_page', 25), 500));
 
         return response()->json([
             'cases' => $cases->items(),
@@ -97,6 +99,8 @@ class CaseController extends Controller
             'case_number' => 'nullable|string|max:50|unique:cases,case_number',
             'assigned_to' => "nullable|exists:users,id,business_id,{$businessId}",
             'court' => 'nullable|string|max:255',
+            'court_number_filed' => 'nullable|string|max:255',
+            'judge' => 'nullable|string|max:255',
             'is_recovery' => 'nullable|boolean',
             'case_type' => 'nullable|in:Plaintiff,Defendant',
             'filed_date' => 'nullable|date',
@@ -122,7 +126,7 @@ class CaseController extends Controller
             foreach ($request->file('documents') as $file) {
                 $info = $storage->upload($business, $case->id, $file);
                 $safeName = preg_replace('/[\r\n\x00-\x1F\x7F]/', '', basename($file->getClientOriginalName()));
-                CaseDocument::create([
+                $doc = CaseDocument::create([
                     'case_id'         => $case->id,
                     'business_id'     => $businessId,
                     'original_name'   => $safeName,
@@ -136,6 +140,11 @@ class CaseController extends Controller
                     'mime_type'       => $info['mime_type'],
                     'uploaded_by'     => $request->user()->id,
                 ]);
+
+                $ext = strtolower($file->getClientOriginalExtension());
+                if ($ext === 'doc' || $ext === 'docx') {
+                    ConvertCaseDocumentToPdf::dispatch($doc->id);
+                }
             }
         }
 
@@ -146,7 +155,7 @@ class CaseController extends Controller
     {
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
-            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel'])
+            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel', 'series:id,reference,name'])
             ->findOrFail($id);
 
         if (!$request->user()->canViewCase($case->assigned_to)) {
@@ -184,8 +193,10 @@ class CaseController extends Controller
             'status' => 'nullable|in:Open,In Progress,Closed,On Hold',
             'priority' => 'nullable|in:Low,Medium,High,Urgent',
             'assigned_to' => "nullable|exists:users,id,business_id,{$case->business_id}",
+            'our_reference' => 'nullable|string|max:255',
             'case_number' => "nullable|string|max:50|unique:cases,case_number,{$case->id}",
             'court' => 'nullable|string|max:255',
+            'court_number_filed' => 'nullable|string|max:255',
             'judge' => 'nullable|string|max:255',
             'is_recovery' => 'nullable|boolean',
             'filed_date' => 'nullable|date',
@@ -231,6 +242,65 @@ class CaseController extends Controller
         $case->delete();
 
         return response()->json(['message' => 'Case deleted']);
+    }
+
+    public function duplicate(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isOwner() && !$user->hasPermissionSafe('case.create')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $original = Cases::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        if (!$user->canViewCase($original->assigned_to)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $ref = $original->our_reference;
+        if ($ref) {
+            $ref = preg_match('/-D\d*$/', $ref) ? preg_replace_callback('/-D(\d*)$/', fn($m) => '-D' . (((int) ($m[1] ?: 1)) + 1), $ref) : $ref . '-D';
+        }
+
+        $newCase = $original->replicate(['id', 'case_number', 'created_at', 'updated_at', 'closed_date', 'outcome']);
+        $newCase->our_reference = $ref;
+        $newCase->status = 'Open';
+        $newCase->created_by = $user->id;
+        $newCase->save();
+
+        $storage = app(TenantDocumentStorage::class);
+        $business = Business::findOrFail($user->business_id);
+        $docs = CaseDocument::where('case_id', $original->id)
+            ->where('business_id', $user->business_id)
+            ->get();
+
+        foreach ($docs as $doc) {
+            try {
+                $info = $storage->copyDocument($doc, $newCase->id, $business);
+                CaseDocument::create([
+                    'case_id'         => $newCase->id,
+                    'business_id'     => $user->business_id,
+                    'original_name'   => $doc->original_name,
+                    'file_path'       => $info['file_path'],
+                    'disk'            => $info['disk'],
+                    'storage_key'     => $info['storage_key'],
+                    'kms_key_id'      => $info['kms_key_id'],
+                    'etag'            => $info['etag'],
+                    'checksum_sha256' => $info['checksum_sha256'],
+                    'file_size'       => $info['file_size'],
+                    'mime_type'       => $info['mime_type'],
+                    'uploaded_by'     => $user->id,
+                ]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return response()->json([
+            'case' => $newCase->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm']),
+        ], 201);
     }
 
     public function toggleStatus(Request $request, int $id): JsonResponse
