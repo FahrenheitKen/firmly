@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-29T05:25:44.378Z",
+  "timestamp": "2026-05-29T07:22:06.744Z",
   "projectRoot": "C:\\laragon\\www\\Firmly",
   "structure": {
     "hasPackageJson": true,
@@ -7,5 +7,5 @@
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1780032344379
+  "scannedAt": 1780039326745
 }

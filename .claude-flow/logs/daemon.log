@@ -5518,3 +5518,123 @@
 [2026-05-29T05:30:44.385Z] [INFO] Running testgaps in headless mode (Claude Code AI)
 [2026-05-29T05:30:44.412Z] [INFO] Worker testgaps completed in 32ms
 [2026-05-29T05:31:26.937Z] [INFO] Worker audit deferred: Memory too low: 9.3% free
+[2026-05-29T05:40:40.923Z] [INFO] Worker consolidate deferred: Memory too low: 7.9% free
+[2026-05-29T05:40:44.395Z] [INFO] Worker map deferred: Memory too low: 6.9% free
+[2026-05-29T05:40:46.466Z] [INFO] Worker optimize deferred: Memory too low: 7.5% free
+[2026-05-29T05:41:26.951Z] [INFO] Worker audit deferred: Memory too low: 9.3% free
+[2026-05-29T05:50:44.504Z] [INFO] Worker testgaps deferred: Memory too low: 9.0% free
+[2026-05-29T05:51:27.005Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T05:51:27.016Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T05:51:34.255Z] [INFO] Worker audit completed in 7288ms
+[2026-05-29T05:51:34.259Z] [INFO] Worker audit deferred: Memory too low: 9.9% free
+[2026-05-29T05:52:04.273Z] [INFO] Starting worker: consolidate (1/2 concurrent)
+[2026-05-29T05:52:04.281Z] [INFO] Worker consolidate completed in 11ms
+[2026-05-29T05:52:04.289Z] [INFO] Starting worker: map (1/2 concurrent)
+[2026-05-29T05:52:04.296Z] [INFO] Starting worker: optimize (2/2 concurrent)
+[2026-05-29T05:52:04.297Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T05:52:04.326Z] [INFO] Worker map completed in 40ms
+[2026-05-29T05:52:04.334Z] [INFO] Starting worker: audit (2/2 concurrent)
+[2026-05-29T05:52:04.335Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T05:52:04.359Z] [INFO] Starting worker: testgaps (3/2 concurrent)
+[2026-05-29T05:52:04.360Z] [INFO] Running testgaps in headless mode (Claude Code AI)
+[2026-05-29T05:52:04.394Z] [INFO] Worker optimize completed in 102ms
+[2026-05-29T05:52:04.398Z] [INFO] Worker audit completed in 67ms
+[2026-05-29T05:52:04.405Z] [INFO] Starting worker: audit (2/2 concurrent)
+[2026-05-29T05:52:04.405Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T05:52:04.440Z] [INFO] Worker audit completed in 38ms
+[2026-05-29T05:52:04.444Z] [INFO] Worker testgaps completed in 88ms
+[2026-05-29T05:55:44.405Z] [INFO] Starting worker: map (1/2 concurrent)
+[2026-05-29T05:55:44.413Z] [INFO] Worker map completed in 10ms
+[2026-05-29T05:55:46.474Z] [INFO] Starting worker: optimize (1/2 concurrent)
+[2026-05-29T05:55:46.474Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T05:55:46.503Z] [INFO] Worker optimize completed in 31ms
+[2026-05-29T06:01:34.269Z] [INFO] Worker audit deferred: Memory too low: 5.4% free
+[2026-05-29T06:10:40.971Z] [INFO] Worker consolidate deferred: Memory too low: 6.1% free
+[2026-05-29T06:10:44.430Z] [INFO] Worker map deferred: Memory too low: 6.2% free
+[2026-05-29T06:10:44.547Z] [INFO] Worker testgaps deferred: Memory too low: 6.0% free
+[2026-05-29T06:10:46.511Z] [INFO] Worker optimize deferred: Memory too low: 6.3% free
+[2026-05-29T06:11:34.288Z] [INFO] Worker audit deferred: Memory too low: 5.0% free
+[2026-05-29T06:21:34.304Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T06:21:34.313Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T06:21:41.003Z] [INFO] Worker audit completed in 6719ms
+[2026-05-29T06:21:41.012Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T06:21:41.013Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T06:21:41.041Z] [INFO] Worker audit completed in 32ms
+[2026-05-29T06:21:41.050Z] [INFO] Starting worker: consolidate (1/2 concurrent)
+[2026-05-29T06:21:41.057Z] [INFO] Starting worker: map (2/2 concurrent)
+[2026-05-29T06:21:41.062Z] [INFO] Worker consolidate completed in 16ms
+[2026-05-29T06:21:41.067Z] [INFO] Worker map completed in 14ms
+[2026-05-29T06:21:41.076Z] [INFO] Starting worker: testgaps (1/2 concurrent)
+[2026-05-29T06:21:41.076Z] [INFO] Running testgaps in headless mode (Claude Code AI)
+[2026-05-29T06:21:41.110Z] [INFO] Starting worker: optimize (2/2 concurrent)
+[2026-05-29T06:21:41.110Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T06:21:41.115Z] [INFO] Starting worker: audit (3/2 concurrent)
+[2026-05-29T06:21:41.116Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T06:21:41.173Z] [INFO] Worker testgaps completed in 101ms
+[2026-05-29T06:21:41.179Z] [INFO] Worker optimize completed in 73ms
+[2026-05-29T06:21:41.184Z] [INFO] Worker audit completed in 73ms
+[2026-05-29T06:25:44.421Z] [INFO] Starting worker: map (1/2 concurrent)
+[2026-05-29T06:25:44.424Z] [INFO] Worker map completed in 7ms
+[2026-05-29T06:25:46.500Z] [INFO] Starting worker: optimize (1/2 concurrent)
+[2026-05-29T06:25:46.501Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T06:25:46.526Z] [INFO] Worker optimize completed in 29ms
+[2026-05-29T06:30:44.552Z] [INFO] Starting worker: testgaps (1/2 concurrent)
+[2026-05-29T06:30:44.553Z] [INFO] Running testgaps in headless mode (Claude Code AI)
+[2026-05-29T06:30:44.595Z] [INFO] Worker testgaps completed in 48ms
+[2026-05-29T06:31:41.019Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T06:31:41.020Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T06:31:44.958Z] [INFO] Worker audit completed in 3943ms
+[2026-05-29T06:40:40.976Z] [INFO] Worker consolidate deferred: Memory too low: 6.3% free
+[2026-05-29T06:40:44.441Z] [INFO] Worker map deferred: Memory too low: 6.7% free
+[2026-05-29T06:40:46.534Z] [INFO] Worker optimize deferred: Memory too low: 6.9% free
+[2026-05-29T06:41:44.977Z] [INFO] Worker audit deferred: Memory too low: 8.9% free
+[2026-05-29T06:50:44.607Z] [INFO] Worker testgaps deferred: Memory too low: 7.3% free
+[2026-05-29T06:51:44.996Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T06:51:44.996Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T06:51:49.981Z] [INFO] Worker audit completed in 4997ms
+[2026-05-29T06:51:49.993Z] [INFO] Starting worker: consolidate (1/2 concurrent)
+[2026-05-29T06:51:49.996Z] [INFO] Worker consolidate completed in 7ms
+[2026-05-29T06:51:50.008Z] [INFO] Starting worker: map (1/2 concurrent)
+[2026-05-29T06:51:50.020Z] [INFO] Starting worker: optimize (2/2 concurrent)
+[2026-05-29T06:51:50.021Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T06:51:50.044Z] [INFO] Worker map completed in 42ms
+[2026-05-29T06:51:50.053Z] [INFO] Starting worker: audit (2/2 concurrent)
+[2026-05-29T06:51:50.054Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T06:51:50.082Z] [INFO] Starting worker: testgaps (3/2 concurrent)
+[2026-05-29T06:51:50.083Z] [INFO] Running testgaps in headless mode (Claude Code AI)
+[2026-05-29T06:51:50.114Z] [INFO] Worker optimize completed in 98ms
+[2026-05-29T06:51:50.119Z] [INFO] Worker audit completed in 70ms
+[2026-05-29T06:51:50.129Z] [INFO] Worker testgaps completed in 54ms
+[2026-05-29T06:55:44.450Z] [INFO] Worker map deferred: Memory too low: 5.3% free
+[2026-05-29T06:55:46.536Z] [INFO] Worker optimize deferred: Memory too low: 4.8% free
+[2026-05-29T07:01:50.124Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T07:01:50.147Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T07:01:55.954Z] [INFO] Worker audit completed in 5876ms
+[2026-05-29T07:01:55.963Z] [INFO] Starting worker: map (1/2 concurrent)
+[2026-05-29T07:01:55.969Z] [INFO] Worker map completed in 10ms
+[2026-05-29T07:01:55.978Z] [INFO] Starting worker: optimize (1/2 concurrent)
+[2026-05-29T07:01:55.980Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T07:01:56.015Z] [INFO] Worker optimize completed in 41ms
+[2026-05-29T07:10:42.030Z] [INFO] Worker consolidate deferred: Memory too low: 0.8% free
+[2026-05-29T07:10:44.620Z] [INFO] Worker map deferred: Memory too low: 0.3% free
+[2026-05-29T07:10:45.551Z] [INFO] Worker testgaps deferred: Memory too low: 1.2% free
+[2026-05-29T07:10:46.556Z] [INFO] Worker optimize deferred: Memory too low: 1.8% free
+[2026-05-29T07:11:55.964Z] [INFO] Worker audit deferred: Memory too low: 3.2% free
+[2026-05-29T07:21:57.343Z] [INFO] Starting worker: audit (1/2 concurrent)
+[2026-05-29T07:21:57.493Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T07:22:06.728Z] [INFO] Worker audit completed in 9705ms
+[2026-05-29T07:22:06.733Z] [INFO] Starting worker: consolidate (1/2 concurrent)
+[2026-05-29T07:22:06.737Z] [INFO] Worker consolidate completed in 7ms
+[2026-05-29T07:22:06.742Z] [INFO] Starting worker: map (1/2 concurrent)
+[2026-05-29T07:22:06.748Z] [INFO] Starting worker: testgaps (2/2 concurrent)
+[2026-05-29T07:22:06.748Z] [INFO] Running testgaps in headless mode (Claude Code AI)
+[2026-05-29T07:22:06.766Z] [INFO] Worker map completed in 26ms
+[2026-05-29T07:22:06.771Z] [INFO] Starting worker: optimize (2/2 concurrent)
+[2026-05-29T07:22:06.771Z] [INFO] Running optimize in headless mode (Claude Code AI)
+[2026-05-29T07:22:06.787Z] [INFO] Starting worker: audit (3/2 concurrent)
+[2026-05-29T07:22:06.787Z] [INFO] Running audit in headless mode (Claude Code AI)
+[2026-05-29T07:22:06.805Z] [INFO] Worker testgaps completed in 59ms
+[2026-05-29T07:22:06.808Z] [INFO] Worker optimize completed in 40ms
+[2026-05-29T07:22:06.816Z] [INFO] Worker audit completed in 29ms
+[2026-05-29T07:25:45.377Z] [INFO] Worker map deferred: Memory too low: 8.6% free
+[2026-05-29T07:25:46.578Z] [INFO] Worker optimize deferred: Memory too low: 8.5% free
