@@ -7,7 +7,24 @@ import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast-context';
 import PageHeader from '@/components/ui/page-header';
 import Modal from '@/components/ui/modal';
+import SearchableSelect from '@/components/ui/searchable-select';
 import TablePagination from '@/components/ui/table-pagination';
+
+interface Client {
+  id: number;
+  first_name: string | null;
+  last_name: string | null;
+  business_name: string | null;
+  client_type: string;
+  client_prefix?: string | null;
+  city?: string | null;
+}
+
+interface User {
+  id: number;
+  first_name: string;
+  last_name: string;
+}
 
 interface SeriesItem {
   id: number;
@@ -23,7 +40,7 @@ interface SeriesItem {
 }
 
 export default function SeriesPage() {
-  const { token, can, isOwner } = useAuth();
+  const { token, user, can, isOwner } = useAuth();
   const canCreate = isOwner || can('case.create');
   const { toast } = useToast();
 
@@ -37,8 +54,16 @@ export default function SeriesPage() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ reference: '', name: '', common_parties: '', notes: '', parent_series_id: '' });
-  const [allSeries, setAllSeries] = useState<{ id: number; reference: string; name: string }[]>([]);
+  const [form, setForm] = useState({
+    title: '', client_id: '', assigned_to: '', client_reference: '', our_reference: '', common_parties: '',
+    court: '', court_number_filed: '', judge: '',
+  });
+  const [clients, setClients] = useState<Client[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [businessName, setBusinessName] = useState('');
+  const [businessId, setBusinessId] = useState(0);
+  const [caseFormat, setCaseFormat] = useState('');
+  const [caseCounter, setCaseCounter] = useState(0);
 
   const fetchSeries = useCallback(async () => {
     if (!token) return;
@@ -60,34 +85,97 @@ export default function SeriesPage() {
     return () => clearTimeout(timer);
   }, [fetchSeries]);
 
-  const openCreate = async () => {
-    setForm({ reference: '', name: '', common_parties: '', notes: '', parent_series_id: '' });
+  const getInitials = (name?: string | null) => {
+    if (!name) return '';
+    const skip = ['&', 'and', 'company', 'advocate', 'advocates', 'attorney', 'attorneys', 'associate', 'associates', 'law', 'legal', 'firm', 'partners', 'partnership', 'llp', 'ltd', 'limited', 'inc', 'llc', 'plc', 'corporation', 'corp', 'co', 'group'];
+    return name.trim().split(/\s+/).filter(w => !skip.includes(w.toLowerCase())).map(w => w[0]).join('').toUpperCase();
+  };
+
+  const getCityAbbrev = (city?: string | null) => {
+    if (!city) return '';
+    const c = city.toUpperCase().trim();
+    const map: Record<string, string> = {
+      'NAIROBI': 'NRB', 'MOMBASA': 'MSA', 'KISUMU': 'KSM',
+      'NAKURU': 'NKU', 'ELDORET': 'ELD', 'THIKA': 'THK',
+      'MACHAKOS': 'MCK', 'MALINDI': 'MYD', 'NANYUKI': 'NYK',
+      'NYERI': 'NYR', 'KAKAMEGA': 'KKM', 'KITALE': 'KTL',
+      'MERU': 'MRU', 'EMBU': 'EMB', 'KISII': 'KSI',
+    };
+    return map[c] || c.slice(0, 3);
+  };
+
+  const generateOurRef = (bizName: string, bizId: number, clientId: string, fmt: string, counter: number, locationCity?: string | null) => {
+    const fi = getInitials(bizName);
+    const client = clients.find(c => String(c.id) === clientId);
+    const cp = client
+      ? (client.client_type === 'individual'
+          ? [client.first_name, client.last_name].filter(Boolean).map((n) => (n as string)[0].toUpperCase()).join('')
+          : (client.client_prefix || (client.business_name ? getInitials(client.business_name) : '')))
+      : '';
+    const ct = getCityAbbrev(locationCity);
+    const seq = String(counter + 1).padStart(3, '0');
+    const yr = new Date().getFullYear().toString();
+    const ref = fmt.replace(/\{(\w+)\}/g, (_, key) => {
+      const map: Record<string, string> = { FI: fi, BI: String(bizId), CP: cp, CT: ct, N: seq, Y: yr };
+      return map[key] || '';
+    });
+    return ref;
+  };
+
+  const openCreate = () => {
+    setForm({ title: '', client_id: '', assigned_to: '', client_reference: '', our_reference: '', common_parties: '', court: '', court_number_filed: '', judge: '' });
     setError('');
     setShowModal(true);
-    if (token) {
-      try {
-        const res = await api.get<{ series: { id: number; reference: string; name: string }[] }>('/case-series?per_page=100', token);
-        setAllSeries(res.series);
-      } catch { /* ignore */ }
-    }
+    if (!token) return;
+    Promise.all([
+      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
+      api.get<{ users: User[] }>('/users?per_page=500', token),
+      api.get<{ business: Record<string, unknown> }>('/business', token),
+    ]).then(([cRes, uRes, bRes]) => {
+      setClients(cRes.clients);
+      setUsers(uRes.users);
+      const b = bRes.business;
+      const refPrefixes = (b.ref_no_prefixes as Record<string, string>) || {};
+      const fmt = refPrefixes.case_number_format || '{FI}/{CP}/{CT}/{N}/{Y}';
+      const counter = (b.case_counter as number) || 0;
+      setBusinessName(b.name as string);
+      setBusinessId(b.id as number);
+      setCaseFormat(fmt);
+      setCaseCounter(counter);
+      setForm((prev) => ({ ...prev, our_reference: generateOurRef(b.name as string, b.id as number, '', fmt, counter, user?.active_location?.city) }));
+    }).catch(() => {});
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    if (!form.title.trim()) { setError('Subject is required'); return; }
     setSaving(true);
     setError('');
     try {
-      await api.post('/case-series', {
-        ...form,
-        parent_series_id: form.parent_series_id || null,
+      const seriesRes = await api.post<{ series: { id: number } }>('/case-series', {
+        reference: form.our_reference,
+        name: form.title,
+        common_parties: form.common_parties || null,
       }, token);
-      toast('Series created', 'success');
+      const seriesId = seriesRes.series.id;
+
+      await api.post(`/case-series/${seriesId}/cases`, {
+        title: form.title,
+        client_id: form.client_id || null,
+        assigned_to: form.assigned_to || null,
+        client_reference: form.client_reference || null,
+        court: form.court || null,
+        court_number_filed: form.court_number_filed || null,
+        judge: form.judge || null,
+      }, token);
+
       setShowModal(false);
       fetchSeries();
+      toast('Series case created successfully', 'success');
     } catch (err: unknown) {
       const errObj = err as { errors?: Record<string, string[]>; message?: string };
-      setError(errObj.errors ? Object.values(errObj.errors).flat().join(', ') : errObj.message || 'Failed to create');
+      setError(errObj.errors ? Object.values(errObj.errors).flat().join(', ') : errObj.message || 'Failed to create series case');
     } finally { setSaving(false); }
   };
 
@@ -174,38 +262,69 @@ export default function SeriesPage() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Case Series" size="lg">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Series Case" size="md">
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Subject *</label>
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Series case subject" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Defendant (Common Party)</label>
+            <input value={form.common_parties} onChange={(e) => setForm({ ...form, common_parties: e.target.value.toUpperCase() })} className={inputClass} placeholder="Defendant (Common Party)" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <SearchableSelect
+              label="Client"
+              value={form.client_id}
+              onChange={(v) => {
+                setForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, user?.active_location?.city) }));
+              }}
+              options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
+              placeholder="Search client..."
+            />
+            <SearchableSelect
+              label="Assigned To"
+              value={form.assigned_to}
+              onChange={(v) => setForm((prev) => ({ ...prev, assigned_to: v }))}
+              options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+              placeholder="Search user..."
+            />
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Series Reference *</label>
-              <input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} className={inputClass} placeholder="e.g. WWA/GA/NKU/532/25" required />
+              <label className="block text-sm font-medium mb-1">Client Reference</label>
+              <input value={form.client_reference} onChange={(e) => setForm({ ...form, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Series Name *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} placeholder="e.g. Easy Coach Accident Series" required />
+              <label className="block text-sm font-medium mb-1">Our Reference</label>
+              <input value={form.our_reference} onChange={(e) => setForm({ ...form, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Common Parties (Defendant Side)</label>
-            <input value={form.common_parties} onChange={(e) => setForm({ ...form, common_parties: e.target.value })} className={inputClass} placeholder="e.g. Easy Coach Ltd & Anor" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Station</label>
+              <input value={form.court} onChange={(e) => setForm({ ...form, court: e.target.value })} className={inputClass} placeholder="Station name" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Before Court No</label>
+              <input value={form.court_number_filed} onChange={(e) => setForm({ ...form, court_number_filed: e.target.value.toUpperCase() })} className={inputClass} placeholder="Before court no" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
+              <input value={form.judge} onChange={(e) => setForm({ ...form, judge: e.target.value })} className={inputClass} placeholder="Magistrate or Judge name" />
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Parent Series (for nesting)</label>
-            <select value={form.parent_series_id} onChange={(e) => setForm({ ...form, parent_series_id: e.target.value })} className={inputClass}>
-              <option value="">None (top-level)</option>
-              {allSeries.map(s => <option key={s.id} value={s.id}>{s.reference} — {s.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Notes</label>
-            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className={inputClass} placeholder="Optional notes about this series" />
-          </div>
+
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
-            <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
-              {saving ? 'Creating...' : 'Create Series'}
+            <button type="submit" disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+              {saving ? 'Creating...' : 'Create Series Case'}
             </button>
           </div>
         </form>

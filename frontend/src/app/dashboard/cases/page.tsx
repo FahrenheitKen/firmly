@@ -593,6 +593,49 @@ export default function CasesPage() {
   const [bulkSeriesCases, setBulkSeriesCases] = useState<{ id: number; series_suffix: string | null; our_reference: string | null; title: string }[]>([]);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- Attach to Series modal ---
+  const [showAttachSeriesModal, setShowAttachSeriesModal] = useState(false);
+  const [attachCaseId, setAttachCaseId] = useState<number | null>(null);
+  const [attachSeriesId, setAttachSeriesId] = useState('');
+  const [seriesList, setSeriesList] = useState<{ id: number; reference: string; name: string; active_cases_count: number }[]>([]);
+  const [attachingSeries, setAttachingSeries] = useState(false);
+
+  const openAttachToSeries = async (caseId: number) => {
+    setOpenDropdown(null);
+    setAttachCaseId(caseId);
+    setAttachSeriesId('');
+    setAttachingSeries(false);
+    setError('');
+    setShowAttachSeriesModal(true);
+    if (token) {
+      try {
+        const res = await api.get<{ series: { id: number; reference: string; name: string; active_cases_count: number }[] }>('/case-series?per_page=500', token);
+        setSeriesList(res.series);
+      } catch { /* ignore */ }
+    }
+  };
+
+  const handleAttachToSeries = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !attachCaseId || !attachSeriesId) return;
+    setAttachingSeries(true);
+    setError('');
+    try {
+      await api.post(`/case-series/${attachSeriesId}/link-case`, { case_id: attachCaseId }, token);
+      setShowAttachSeriesModal(false);
+      setAttachCaseId(null);
+      fetchCases();
+      showToast('Case attached to series', 'success');
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      const msg = errObj.message || 'Failed to attach case to series';
+      setError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setAttachingSeries(false);
+    }
+  };
+
   const openBulkUpload = async (seriesId: number, seriesRef: string) => {
     setOpenSeriesDropdown(null);
     setBulkUploadSeriesId(seriesId);
@@ -920,6 +963,12 @@ export default function CasesPage() {
                           <button onClick={() => duplicateCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                             Duplicate
+                          </button>
+                        )}
+                        {canUpdate && !c.case_series_id && (
+                          <button onClick={() => openAttachToSeries(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                            Attach to Series
                           </button>
                         )}
                         {canDelete && (
@@ -1685,6 +1734,46 @@ export default function CasesPage() {
             <button type="button" onClick={() => { setShowBulkUploadModal(false); setBulkUploadSeriesId(null); setBulkFiles([]); setBulkUploadProgress(-1); setError(''); }} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
             <button type="submit" disabled={bulkUploading || bulkFiles.length === 0} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
               {bulkUploading ? `Uploading ${bulkUploadProgress}%` : `Upload to ${bulkSeriesCases.length - bulkExcludeCaseIds.length} Case${(bulkSeriesCases.length - bulkExcludeCaseIds.length) !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={showAttachSeriesModal} onClose={() => { setShowAttachSeriesModal(false); setAttachCaseId(null); setSeriesList([]); setError(''); }} title="Attach to Series" size="sm">
+        <form onSubmit={handleAttachToSeries} className="space-y-4">
+          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
+
+          <p className="text-sm text-muted">
+            Select a series to attach this case to. If the series has no cases, this will become <strong>Series-A</strong>. Otherwise it takes the next letter.
+          </p>
+
+          <SearchableSelect
+            label="Series *"
+            value={attachSeriesId}
+            onChange={(v) => setAttachSeriesId(v)}
+            options={[{ value: '', label: 'Select a series...' }, ...seriesList.map((s) => ({ value: String(s.id), label: `${s.reference} — ${s.name} (${s.active_cases_count} case${s.active_cases_count !== 1 ? 's' : ''})` }))]}
+            placeholder="Search series..."
+          />
+
+          {attachSeriesId && (() => {
+            const selected = seriesList.find((s) => String(s.id) === attachSeriesId);
+            if (!selected) return null;
+            return (
+              <div className="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 text-sm">
+                <span className="font-medium">{selected.reference}</span>
+                <span className="text-muted ml-2">
+                  {selected.active_cases_count === 0
+                    ? '— No cases yet. This case will become suffix A.'
+                    : `— ${selected.active_cases_count} existing case${selected.active_cases_count !== 1 ? 's' : ''}. This case will get the next suffix.`}
+                </span>
+              </div>
+            );
+          })()}
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <button type="button" onClick={() => { setShowAttachSeriesModal(false); setAttachCaseId(null); setSeriesList([]); setError(''); }} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
+            <button type="submit" disabled={attachingSeries || !attachSeriesId} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+              {attachingSeries ? 'Attaching...' : 'Attach to Series'}
             </button>
           </div>
         </form>
