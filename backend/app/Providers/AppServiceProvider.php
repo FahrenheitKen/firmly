@@ -41,6 +41,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        if (!config('app.frontend_url')) {
+            throw new \RuntimeException('FRONTEND_URL is not configured. Set it in .env and run `php artisan config:clear`.');
+        }
     }
 }

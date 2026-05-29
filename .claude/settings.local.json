@@ -234,7 +234,8 @@
       "mcp__ruflo__system_status",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers',{}\\), indent=2\\)\\)\")",
       "Bash(tasklist)",
-      "mcp__claude-flow__system_status"
+      "mcp__claude-flow__system_status",
+      "Bash(echo \"services: $\\(systemctl is-active firmly-frontend firmly-queue php8.2-fpm)"
     ]
   },
   "enableAllProjectMcpServers": true,
