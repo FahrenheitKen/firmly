@@ -26,9 +26,15 @@ class CaseSeriesController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $viewOwnOnly = $user->restrictedToOwnCases();
+
         $query = CaseSeries::where('business_id', $user->business_id)
             ->where('location_id', $user->active_location_id)
-            ->withCount('activeCases')
+            ->when($viewOwnOnly, fn($q) => $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)))
+            ->when($viewOwnOnly,
+                fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)]),
+                fn($q) => $q->withCount('activeCases')
+            )
             ->with(['parentSeries:id,reference,name', 'childSeries:id,parent_series_id,reference,name', 'createdByUser:id,first_name,last_name']);
 
         if ($search = $request->query('search')) {
@@ -93,16 +99,27 @@ class CaseSeriesController extends Controller
     public function show(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-        $series = CaseSeries::where('business_id', $user->business_id)
+        $viewOwnOnly = $user->restrictedToOwnCases();
+
+        $query = CaseSeries::where('business_id', $user->business_id)
             ->where('location_id', $user->active_location_id)
-            ->withCount('activeCases')
+            ->when($viewOwnOnly, fn($q) => $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)));
+
+        $casesEagerLoad = fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'status', 'assigned_to', 'client_id')
+            ->when($viewOwnOnly, fn($c) => $c->where('assigned_to', $user->id))
+            ->with(['assignedTo:id,first_name,last_name', 'client:id,first_name,last_name,business_name'])
+            ->orderByRaw("FIELD(series_suffix, '') DESC, series_suffix ASC");
+
+        $series = $query
+            ->when($viewOwnOnly,
+                fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)]),
+                fn($q) => $q->withCount('activeCases')
+            )
             ->with([
                 'parentSeries:id,reference,name',
                 'childSeries:id,parent_series_id,reference,name',
                 'createdByUser:id,first_name,last_name',
-                'activeCases' => fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'status', 'assigned_to', 'client_id')
-                    ->with(['assignedTo:id,first_name,last_name', 'client:id,first_name,last_name,business_name'])
-                    ->orderByRaw("FIELD(series_suffix, '') DESC, series_suffix ASC"),
+                'activeCases' => $casesEagerLoad,
             ])
             ->findOrFail($id);
 
@@ -191,6 +208,14 @@ class CaseSeriesController extends Controller
         $basePart = implode('/', array_slice($refParts, 0, -1));
         $ourRef = $basePart . '-' . $suffix . '/' . $yearPart;
 
+        // Inherit shared fields from existing case in series if not provided
+        $firstCase = $series->activeCases()->first();
+        $clientId = $validated['client_id'] ?? ($firstCase?->client_id);
+        $assignedTo = $validated['assigned_to'] ?? ($firstCase?->assigned_to);
+        $court = $validated['court'] ?? ($firstCase?->court);
+        $courtNumberFiled = $validated['court_number_filed'] ?? ($firstCase?->court_number_filed);
+        $judge = $validated['judge'] ?? ($firstCase?->judge);
+
         $case = Cases::create([
             'business_id' => $businessId,
             'location_id' => $user->active_location_id,
@@ -198,14 +223,14 @@ class CaseSeriesController extends Controller
             'series_suffix' => $suffix,
             'title' => $validated['title'],
             'our_reference' => $ourRef,
-            'client_id' => $validated['client_id'] ?? null,
+            'client_id' => $clientId,
             'client_reference' => $validated['client_reference'] ?? null,
             'opposing_counsel_id' => $validated['opposing_counsel_id'] ?? null,
-            'assigned_to' => $validated['assigned_to'] ?? null,
+            'assigned_to' => $assignedTo,
             'case_number' => $validated['case_number'] ?? null,
-            'court' => $validated['court'] ?? null,
-            'court_number_filed' => $validated['court_number_filed'] ?? null,
-            'judge' => $validated['judge'] ?? null,
+            'court' => $court,
+            'court_number_filed' => $courtNumberFiled,
+            'judge' => $judge,
             'case_type' => $validated['case_type'] ?? null,
             'filed_date' => $validated['filed_date'] ?? null,
             'description' => $validated['description'] ?? null,

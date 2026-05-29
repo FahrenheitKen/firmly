@@ -26,7 +26,7 @@ export default function Sidebar() {
     const items: Array<{ label: string; href: string }> = [];
     if (isOwner || can('case.view_all') || can('case.view_own') || can('case.view')) {
       items.push({ label: 'Cases', href: '/dashboard/cases' });
-      items.push({ label: 'Case Series', href: '/dashboard/series' });
+      items.push({ label: 'Series Cases', href: '/dashboard/series' });
     }
     if (isOwner || can('task.view_all') || can('task.view_own')) {
       items.push({ label: 'Tasks', href: '/dashboard/tasks' });

@@ -1,0 +1,194 @@
+/**
+ * ADR-121 Phase 11 — RRF fusion tests.
+ *
+ * Coverage:
+ *  - Single-list fusion is a no-op (preserves rank order)
+ *  - Items appearing in MORE lists rank above items appearing in FEWER
+ *  - k_rrf default = 60 (SIGIR 2009)
+ *  - k_rrf affects the contribution decay shape
+ *  - Per-list weights bias the fused score
+ *  - Empty lists, empty input, k clamping
+ *  - Tie-break is stable on id (alphabetical)
+ *  - Hand-computed exact scores on a small example
+ *  - Payload is preserved from the first list the item appears in
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  reciprocalRankFusion,
+  rrfIds,
+  type RrfListItem,
+} from '../rrf.js';
+
+describe('reciprocalRankFusion — basic contract', () => {
+  it('returns empty array on empty input', () => {
+    expect(reciprocalRankFusion([], { k: 5 })).toEqual([]);
+  });
+
+  it('returns empty when k=0', () => {
+    expect(reciprocalRankFusion([[{ id: 'a' }]], { k: 0 })).toEqual([]);
+  });
+
+  it('clamps k to unique-item count', () => {
+    const out = reciprocalRankFusion([[{ id: 'a' }, { id: 'b' }]], { k: 100 });
+    expect(out.length).toBe(2);
+  });
+
+  it('throws on kRrf <= 0', () => {
+    expect(() => reciprocalRankFusion([[{ id: 'a' }]], { k: 1, kRrf: 0 })).toThrow();
+    expect(() => reciprocalRankFusion([[{ id: 'a' }]], { k: 1, kRrf: -1 })).toThrow();
+  });
+
+  it('throws when listWeights length mismatches', () => {
+    expect(() => reciprocalRankFusion(
+      [[{ id: 'a' }], [{ id: 'b' }]],
+      { k: 2, listWeights: [1] },
+    )).toThrow();
+  });
+});
+
+describe('reciprocalRankFusion — single-list fusion', () => {
+  it('preserves rank order on a single list', () => {
+    const list: RrfListItem[] = [
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c' },
+    ];
+    const out = reciprocalRankFusion([list], { k: 3 });
+    expect(out.map(h => h.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('emits per-list ranks even for single list', () => {
+    const out = reciprocalRankFusion([[{ id: 'a' }, { id: 'b' }]], { k: 2 });
+    expect(out[0]!.ranks).toEqual([1]);
+    expect(out[1]!.ranks).toEqual([2]);
+  });
+});
+
+describe('reciprocalRankFusion — multi-list ensemble', () => {
+  it('items in more lists outrank items in fewer (with default kRrf=60)', () => {
+    // 'shared' appears in BOTH lists at rank 3 each;
+    // 'l1-only' appears only in list 1 at rank 1;
+    // 'l2-only' appears only in list 2 at rank 1.
+    //
+    // 'shared' contribution:  1/(60+3) + 1/(60+3) = 2/63 ≈ 0.0317
+    // 'l1-only' contribution: 1/(60+1) = 1/61      ≈ 0.0164
+    // 'l2-only' contribution: 1/(60+1) = 1/61      ≈ 0.0164
+    //
+    // So 'shared' wins despite never being rank 1.
+    const list1: RrfListItem[] = [
+      { id: 'l1-only' },
+      { id: 'x' },
+      { id: 'shared' },
+    ];
+    const list2: RrfListItem[] = [
+      { id: 'l2-only' },
+      { id: 'y' },
+      { id: 'shared' },
+    ];
+    const out = reciprocalRankFusion([list1, list2], { k: 5 });
+    expect(out[0]!.id).toBe('shared');
+    expect(out[0]!.listOccurrences).toBe(2);
+    // Per-list ranks must reflect actual positions.
+    expect(out[0]!.ranks).toEqual([3, 3]);
+  });
+
+  it('computes exact SIGIR-2009 score on a hand example', () => {
+    // 'a' appears at rank 1 in both lists: score = 2/(60+1) = 2/61
+    // 'b' appears at rank 2 in both lists: score = 2/(60+2) = 2/62
+    // 'c' appears only at rank 3 in list 1: score = 1/(60+3) = 1/63
+    const list1: RrfListItem[] = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    const list2: RrfListItem[] = [{ id: 'a' }, { id: 'b' }];
+    const out = reciprocalRankFusion([list1, list2], { k: 3 });
+    expect(out[0]!.id).toBe('a');
+    expect(out[0]!.score).toBeCloseTo(2 / 61, 8);
+    expect(out[1]!.id).toBe('b');
+    expect(out[1]!.score).toBeCloseTo(2 / 62, 8);
+    expect(out[2]!.id).toBe('c');
+    expect(out[2]!.score).toBeCloseTo(1 / 63, 8);
+  });
+});
+
+describe('reciprocalRankFusion — kRrf parameter', () => {
+  it('smaller kRrf weights top ranks more heavily', () => {
+    // With kRrf=1:  rank-1 contribution = 1/2 = 0.5,  rank-10 = 1/11 ≈ 0.091
+    //   ratio = 0.5 / 0.091 ≈ 5.5×
+    // With kRrf=60: rank-1 contribution = 1/61 ≈ 0.0164, rank-10 = 1/70 ≈ 0.0143
+    //   ratio ≈ 1.15×
+    // i.e. the smaller kRrf dramatically over-weights rank-1.
+    const longList: RrfListItem[] = Array.from({ length: 10 }, (_, i) => ({ id: `r${i+1}` }));
+    const tinyList: RrfListItem[] = [{ id: 'r10' }]; // only the bottom of longList
+
+    const sharp = reciprocalRankFusion([longList, tinyList], { k: 3, kRrf: 1 });
+    // r10 is rank-10 in longList (contribution 1/11) AND rank-1 in tinyList
+    // (contribution 1/2). Total = 1/2 + 1/11 ≈ 0.591. So r10 should top.
+    expect(sharp[0]!.id).toBe('r10');
+
+    const flat = reciprocalRankFusion([longList, tinyList], { k: 3, kRrf: 60 });
+    // r10: 1/70 + 1/61 ≈ 0.0307
+    // r1:  1/61       ≈ 0.0164
+    // r10 still wins but much less dominantly.
+    expect(flat[0]!.id).toBe('r10');
+  });
+});
+
+describe('reciprocalRankFusion — listWeights', () => {
+  it('a weighted list contributes proportionally more', () => {
+    const l1: RrfListItem[] = [{ id: 'x' }];
+    const l2: RrfListItem[] = [{ id: 'y' }];
+    // Equal weights: tie → alphabetical → 'x' first.
+    const equal = reciprocalRankFusion([l1, l2], { k: 2 });
+    expect(equal[0]!.id).toBe('x');
+
+    // Weight list-2 5×: 'y' wins.
+    const weighted = reciprocalRankFusion([l1, l2], { k: 2, listWeights: [1, 5] });
+    expect(weighted[0]!.id).toBe('y');
+  });
+});
+
+describe('reciprocalRankFusion — tie-break', () => {
+  it('breaks ties on id alphabetically for determinism', () => {
+    // 'b' and 'a' tied (both rank-1 in their only list)
+    const out = reciprocalRankFusion(
+      [[{ id: 'b' }], [{ id: 'a' }]],
+      { k: 2 },
+    );
+    expect(out[0]!.id).toBe('a');
+    expect(out[1]!.id).toBe('b');
+  });
+});
+
+describe('reciprocalRankFusion — payload preservation', () => {
+  it('preserves payload from the FIRST list an item appears in', () => {
+    const out = reciprocalRankFusion(
+      [
+        [{ id: 'x', payload: { from: 'list-1' } }],
+        [{ id: 'x', payload: { from: 'list-2' } }],
+      ],
+      { k: 1 },
+    );
+    expect(out[0]!.payload).toEqual({ from: 'list-1' });
+  });
+});
+
+describe('reciprocalRankFusion — edge: empty lists', () => {
+  it('handles a mix of empty and non-empty lists', () => {
+    const out = reciprocalRankFusion(
+      [[], [{ id: 'a' }], [], [{ id: 'a' }, { id: 'b' }]],
+      { k: 2 },
+    );
+    expect(out[0]!.id).toBe('a');
+    expect(out[0]!.listOccurrences).toBe(2);
+    expect(out[1]!.id).toBe('b');
+  });
+});
+
+describe('rrfIds helper', () => {
+  it('returns just the fused ids', () => {
+    const ids = rrfIds(
+      [[{ id: 'a' }, { id: 'b' }], [{ id: 'a' }]],
+      { k: 2 },
+    );
+    expect(ids).toEqual(['a', 'b']);
+  });
+});

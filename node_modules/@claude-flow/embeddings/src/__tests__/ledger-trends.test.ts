@@ -1,0 +1,170 @@
+/**
+ * ADR-121 Phase 23 — Ledger trends + drift detection tests.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { renderSparkline, detectDrift, summarizeBenchmarkTrend } from '../ledger-trends.js';
+
+describe('renderSparkline', () => {
+  it('returns empty string for empty input', () => {
+    expect(renderSparkline([])).toBe('');
+  });
+
+  it('returns one char per input value', () => {
+    expect(renderSparkline([1, 2, 3, 4]).length).toBe(4);
+  });
+
+  it('all-identical values produce a flat line', () => {
+    const result = renderSparkline([5, 5, 5, 5]);
+    expect(result.length).toBe(4);
+    // All characters identical (flat line)
+    expect(new Set(result.split('')).size).toBe(1);
+  });
+
+  it('strictly increasing series uses progressively higher ramp chars', () => {
+    const result = renderSparkline([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result.length).toBe(8);
+    // First char should be at or below middle of ramp; last char should be at top.
+    expect(result[0]).toBe('▁');
+    expect(result[result.length - 1]).toBe('█');
+  });
+
+  it('uses the 8-level block ramp', () => {
+    const result = renderSparkline([0, 1, 2, 3, 4, 5, 6, 7]);
+    const ramp = '▁▂▃▄▅▆▇█';
+    for (const ch of result) {
+      expect(ramp).toContain(ch);
+    }
+  });
+
+  it('handles NaN / Infinity by rendering ?', () => {
+    const result = renderSparkline([1, NaN, 3, Infinity]);
+    expect(result.length).toBe(4);
+    expect(result[1]).toBe('?');
+    expect(result[3]).toBe('?');
+  });
+
+  it('all-NaN input → all-? output', () => {
+    expect(renderSparkline([NaN, NaN, NaN])).toBe('???');
+  });
+});
+
+describe('detectDrift — basic shape', () => {
+  it('skipped=true when input is too short', () => {
+    const r = detectDrift([0.5, 0.6, 0.55], { windowSize: 3 });
+    expect(r.skipped).toBe(true);
+    expect(r.passed).toBe(true);
+    expect(r.reason).toMatch(/skipped/);
+  });
+
+  it('skipped=false when there are 2*windowSize samples', () => {
+    const r = detectDrift([0.5, 0.5, 0.5, 0.5, 0.5, 0.5], { windowSize: 3 });
+    expect(r.skipped).toBe(false);
+  });
+});
+
+describe('detectDrift — higher-is-better', () => {
+  it('no drift when series is flat', () => {
+    const r = detectDrift([0.85, 0.85, 0.85, 0.85, 0.85, 0.85]);
+    expect(r.passed).toBe(true);
+    expect(r.drift).toBe(0);
+  });
+
+  it('no drift on small late drop within threshold', () => {
+    // Early 0.85, late 0.83 → drift = -2.4% → within default 15%
+    const r = detectDrift([0.85, 0.85, 0.85, 0.83, 0.83, 0.83]);
+    expect(r.passed).toBe(true);
+    expect(r.drift).toBeCloseTo(-0.024, 2);
+  });
+
+  it('DRIFT on the "death by a thousand cuts" pattern', () => {
+    // 10 values dropping 3% each step. Single-step regression check
+    // would pass (each step is just 3%, well below 10% threshold)
+    // but cumulative drift across the chain is large.
+    //   Early window mean = (1.00 + 0.97 + 0.94) / 3 = 0.9700
+    //   Late window mean  = (0.79 + 0.76 + 0.73) / 3 = 0.7600
+    //   Drift = (0.76 - 0.97) / 0.97 ≈ -21.6% → exceeds 15% threshold
+    const values = Array.from({ length: 10 }, (_, i) => 1.0 - 0.03 * i);
+    const r = detectDrift(values, { windowSize: 3, threshold: 0.15 });
+    expect(r.skipped).toBe(false);
+    expect(r.passed).toBe(false);
+    expect(r.drift).toBeLessThan(-0.15);
+    expect(r.reason).toMatch(/DRIFT DETECTED/);
+  });
+
+  it('PASS on rising trend (improvement is not drift)', () => {
+    const values = Array.from({ length: 10 }, (_, i) => 0.5 + 0.02 * i);
+    const r = detectDrift(values);
+    expect(r.passed).toBe(true);
+    expect(r.drift).toBeGreaterThan(0);
+  });
+
+  it('custom threshold changes the verdict', () => {
+    const values = [1.0, 1.0, 1.0, 0.9, 0.9, 0.9]; // ~10% drift
+    const loose = detectDrift(values, { threshold: 0.20 });
+    const tight = detectDrift(values, { threshold: 0.05 });
+    expect(loose.passed).toBe(true);
+    expect(tight.passed).toBe(false);
+  });
+
+  it('custom windowSize changes the smoothing', () => {
+    const values = [1.0, 1.0, 1.0, 1.0, 0.5, 0.5]; // sharp late drop
+    const small = detectDrift(values, { windowSize: 2 });
+    // Early window (1.0, 1.0), late window (0.5, 0.5) → drift -50%
+    expect(small.passed).toBe(false);
+  });
+});
+
+describe('detectDrift — lower-is-better (latency, cost)', () => {
+  it('no drift when latency stays flat', () => {
+    const r = detectDrift([100, 100, 100, 100, 100, 100], { direction: 'lower' });
+    expect(r.passed).toBe(true);
+  });
+
+  it('DRIFT when latency grows beyond threshold', () => {
+    // Latency drift up — 100ms → 150ms = 50% growth
+    const r = detectDrift([100, 100, 100, 150, 150, 150], { direction: 'lower', threshold: 0.15 });
+    expect(r.passed).toBe(false);
+    expect(r.reason).toMatch(/DRIFT DETECTED.*grew/);
+  });
+
+  it('PASS when latency drops (improvement)', () => {
+    const r = detectDrift([100, 100, 100, 50, 50, 50], { direction: 'lower' });
+    expect(r.passed).toBe(true);
+    expect(r.drift).toBeLessThan(0);
+  });
+});
+
+describe('detectDrift — edge cases', () => {
+  it('handles early mean = 0', () => {
+    const r = detectDrift([0, 0, 0, 0.5, 0.5, 0.5]);
+    expect(r.drift).toBe(Infinity);
+    // Infinity is interpreted as huge improvement for higher-is-better, so passed
+    expect(r.passed).toBe(true);
+  });
+
+  it('ignores non-finite values in the windows', () => {
+    const r = detectDrift([0.9, 0.9, 0.9, NaN, 0.9, 0.9, Infinity, 0.9, 0.9]);
+    // Should compute distinct windows using finite values only.
+    expect(r.skipped).toBe(false);
+  });
+});
+
+describe('summarizeBenchmarkTrend', () => {
+  it('produces sparkline + drift verdict + latest value', () => {
+    const values = [0.8, 0.85, 0.9, 0.88, 0.92, 0.95];
+    const s = summarizeBenchmarkTrend(values, 'bench-a', 'results.recall');
+    expect(s.benchmark).toBe('bench-a');
+    expect(s.metricPath).toBe('results.recall');
+    expect(s.sparkline.length).toBe(6);
+    expect(s.sampleCount).toBe(6);
+    expect(s.latestValue).toBe(0.95);
+    expect(s.drift.passed).toBe(true);
+  });
+
+  it('reports null latest on empty input', () => {
+    const s = summarizeBenchmarkTrend([], 'bench-a', 'results.recall');
+    expect(s.latestValue).toBeNull();
+    expect(s.sparkline).toBe('');
+  });
+});

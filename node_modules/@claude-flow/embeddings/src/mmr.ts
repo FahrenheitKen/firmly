@@ -1,0 +1,181 @@
+/**
+ * ADR-121 Phase 10 — Maximal Marginal Relevance (MMR) diversity rerank.
+ *
+ * Plain top-k vector retrieval optimizes for relevance only — when a
+ * corpus contains near-duplicate chunks (e.g. multiple versions of the
+ * same doc, several paragraphs that paraphrase the same fact), the
+ * top-k typically returns redundant variants of one good answer.
+ *
+ * MMR (Carbonell & Goldstein, 1998) addresses this by iteratively
+ * picking the next-best item as a tradeoff between:
+ *   - relevance to the query                  (sim(item, query))
+ *   - dissimilarity from already-picked items (max sim(item, picked))
+ *
+ *   score(item) = λ · sim(item, query) − (1 − λ) · max sim(item, picked)
+ *
+ * λ = 1 → pure relevance (same as plain top-k)
+ * λ = 0 → pure diversity (ignores query relevance)
+ * Typical production value: λ ≈ 0.5–0.7.
+ *
+ * This module ships the algorithm as a pure function so callers can
+ * compose it however they want — apply to AnnRouter results, to raw
+ * search hits, to memory recall, etc. The CLI's
+ * `embeddings_search_text_diverse` tool wraps search_text + mmrRerank
+ * for one-call diverse RAG.
+ */
+
+export interface MmrCandidate {
+  /** Caller-supplied identifier. */
+  readonly id: string;
+  /** Embedding vector. Required — MMR needs it for the diversity term. */
+  readonly vector: Float32Array | number[];
+  /** Optional relevance score from the prior search step. */
+  readonly score?: number;
+  /** Free-form payload — preserved through the rerank. */
+  readonly payload?: unknown;
+}
+
+export interface MmrOptions {
+  /** Number of items to return. Clamped to candidates.length. */
+  readonly k: number;
+  /**
+   * Relevance/diversity tradeoff in [0, 1].
+   * 1 = pure relevance (same as plain top-k by query-similarity).
+   * 0 = pure diversity (ignores query relevance entirely).
+   * Default 0.5 — balanced.
+   */
+  readonly lambda?: number;
+}
+
+export interface MmrPickedHit {
+  readonly id: string;
+  readonly vector: Float32Array;
+  readonly payload?: unknown;
+  /** Final MMR score at the iteration this item was picked. */
+  readonly mmrScore: number;
+  /** Original relevance score (query similarity). */
+  readonly relevance: number;
+  /** Max similarity to already-picked items at pick time (0 for the first pick). */
+  readonly redundancy: number;
+  /** Order this item was selected — 0 is the highest-relevance pick. */
+  readonly pickOrder: number;
+}
+
+/**
+ * Cosine similarity over two Float32Array views. Defined here rather
+ * than imported so this module's dep graph stays at zero.
+ */
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0, na = 0, nb = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    dot += a[i]! * b[i]!;
+    na += a[i]! * a[i]!;
+    nb += b[i]! * b[i]!;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function toFloat32(v: Float32Array | number[]): Float32Array {
+  return v instanceof Float32Array ? v : new Float32Array(v);
+}
+
+/**
+ * Iterative MMR over a candidate set. Time complexity:
+ *   O(k · N · dim) where N = candidates.length, dim = vector length
+ *
+ * For typical RAG (k=10, N=50, dim=384) that's <200k ops — trivial.
+ */
+export function mmrRerank(
+  candidates: ReadonlyArray<MmrCandidate>,
+  queryVector: Float32Array | number[],
+  options: MmrOptions,
+): MmrPickedHit[] {
+  const lambda = Math.max(0, Math.min(1, options.lambda ?? 0.5));
+  const k = Math.max(0, Math.min(options.k, candidates.length));
+  if (k === 0 || candidates.length === 0) return [];
+
+  const query = toFloat32(queryVector);
+
+  // Pre-compute query similarity for each candidate. The MMR loop
+  // only needs candidate-to-picked sim recomputed on each pick.
+  const items = candidates.map((c, idx) => {
+    const vec = toFloat32(c.vector);
+    const relevance = cosineSimilarity(query, vec);
+    return { idx, id: c.id, vector: vec, payload: c.payload, relevance };
+  });
+
+  const picked: MmrPickedHit[] = [];
+  const pickedVectors: Float32Array[] = [];
+  const remaining = new Set<number>(items.map((_, i) => i));
+
+  while (picked.length < k && remaining.size > 0) {
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    let bestRedundancy = 0;
+
+    for (const i of remaining) {
+      const item = items[i]!;
+      // Max similarity to anything already picked (0 if nothing picked yet).
+      let maxSim = 0;
+      for (const pv of pickedVectors) {
+        const s = cosineSimilarity(item.vector, pv);
+        if (s > maxSim) maxSim = s;
+      }
+      const score = lambda * item.relevance - (1 - lambda) * maxSim;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+        bestRedundancy = maxSim;
+      }
+    }
+
+    if (bestIdx < 0) break;
+    const winner = items[bestIdx]!;
+    remaining.delete(bestIdx);
+    picked.push({
+      id: winner.id,
+      vector: winner.vector,
+      payload: winner.payload,
+      mmrScore: bestScore,
+      relevance: winner.relevance,
+      redundancy: bestRedundancy,
+      pickOrder: picked.length,
+    });
+    pickedVectors.push(winner.vector);
+  }
+
+  return picked;
+}
+
+/**
+ * Convenience: same as mmrRerank but returns just ids in pick order.
+ * Useful when the caller already has the full candidate metadata
+ * elsewhere and just needs the diversified ordering.
+ */
+export function mmrIds(
+  candidates: ReadonlyArray<MmrCandidate>,
+  queryVector: Float32Array | number[],
+  options: MmrOptions,
+): string[] {
+  return mmrRerank(candidates, queryVector, options).map(p => p.id);
+}
+
+/**
+ * Diagnostic — measure how much MMR diversified the result vs plain
+ * top-k. Returns the **average pairwise similarity** of the picked set;
+ * lower = more diverse. Useful for the CI smoke + cost trackers.
+ */
+export function averagePairwiseSimilarity(picked: ReadonlyArray<MmrPickedHit>): number {
+  if (picked.length < 2) return 0;
+  let total = 0;
+  let pairs = 0;
+  for (let i = 0; i < picked.length; i++) {
+    for (let j = i + 1; j < picked.length; j++) {
+      total += cosineSimilarity(picked[i]!.vector, picked[j]!.vector);
+      pairs++;
+    }
+  }
+  return total / pairs;
+}

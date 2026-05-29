@@ -320,7 +320,7 @@ export default function UsersPage() {
 
           <div>
             <h4 className="font-medium text-sm mb-3">Location Access</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
               {locations.map((loc) => (
                 <label key={loc.id} className="flex items-center gap-2 p-2 rounded border border-border cursor-pointer hover:bg-gray-50 text-sm">
                   <input type="checkbox" checked={((editForm.location_permissions as number[]) || []).includes(loc.id)} onChange={() => toggleLocation(loc.id)} className="w-4 h-4 text-primary rounded" />

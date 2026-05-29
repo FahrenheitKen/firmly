@@ -104,7 +104,7 @@ export default function ExpenseCategoriesPage() {
       ) : categories.length === 0 ? (
         <div className="text-center py-16 text-muted">No expense categories yet. Add your first category.</div>
       ) : (
-        <div className="bg-card-bg rounded-xl border border-border overflow-visible">
+        <div className="bg-card-bg rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-gray-50">

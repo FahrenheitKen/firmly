@@ -1,0 +1,197 @@
+/**
+ * V3 Claude-Flow Shared Types
+ * Core type definitions for the 15-agent swarm coordination system
+ *
+ * Based on ADR-002 (DDD) and ADR-003 (Single Coordination Engine)
+ */
+export type AgentId = `agent-${number}` | string;
+export type AgentRole = 'queen-coordinator' | 'security-architect' | 'security-implementer' | 'security-tester' | 'core-architect' | 'core-implementer' | 'memory-specialist' | 'swarm-specialist' | 'mcp-specialist' | 'integration-architect' | 'cli-hooks-developer' | 'neural-learning-dev' | 'tdd-test-engineer' | 'performance-engineer' | 'release-engineer';
+export type AgentStatus = 'idle' | 'active' | 'blocked' | 'completed' | 'error';
+export type AgentDomain = 'security' | 'core' | 'integration' | 'quality' | 'performance' | 'deployment';
+export interface AgentCapability {
+    name: string;
+    description: string;
+    supportedTaskTypes: TaskType[];
+}
+export interface AgentDefinition {
+    id: AgentId;
+    role: AgentRole;
+    domain: AgentDomain;
+    description: string;
+    capabilities: AgentCapability[];
+    dependencies: AgentId[];
+    priority: number;
+}
+export interface AgentState {
+    id: AgentId;
+    role: AgentRole;
+    status: AgentStatus;
+    currentTask: TaskId | null;
+    completedTasks: TaskId[];
+    metrics: AgentMetrics;
+    lastHeartbeat: number;
+}
+export interface AgentMetrics {
+    tasksCompleted: number;
+    tasksFailed: number;
+    averageTaskDuration: number;
+    utilization: number;
+    startTime: number;
+}
+export type TaskId = `task-${string}`;
+export type TaskType = 'security-audit' | 'security-fix' | 'security-test' | 'architecture-design' | 'implementation' | 'memory-optimization' | 'swarm-coordination' | 'mcp-enhancement' | 'integration' | 'cli-development' | 'neural-training' | 'test-writing' | 'benchmark' | 'deployment' | 'documentation';
+export type TaskStatus = 'pending' | 'queued' | 'assigned' | 'in-progress' | 'blocked' | 'completed' | 'failed' | 'cancelled';
+export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
+export interface TaskDefinition {
+    id: TaskId;
+    type: TaskType;
+    title: string;
+    description: string;
+    assignedAgent: AgentId | null;
+    status: TaskStatus;
+    priority: TaskPriority;
+    dependencies: TaskId[];
+    blockedBy: TaskId[];
+    metadata: TaskMetadata;
+    createdAt: number;
+    updatedAt: number;
+    completedAt: number | null;
+}
+export interface TaskMetadata {
+    domain: AgentDomain;
+    phase: PhaseId;
+    estimatedDuration: number;
+    actualDuration: number | null;
+    retryCount: number;
+    maxRetries: number;
+    artifacts: string[];
+    tags: string[];
+}
+export interface TaskResult {
+    taskId: TaskId;
+    success: boolean;
+    output: unknown;
+    error: Error | null;
+    duration: number;
+    metrics: TaskResultMetrics;
+}
+export interface TaskResultMetrics {
+    linesOfCode: number;
+    testsWritten: number;
+    testsPassed: number;
+    coveragePercent: number;
+    performanceImpact: number;
+}
+export type PhaseId = 'phase-1-foundation' | 'phase-2-core' | 'phase-3-integration' | 'phase-4-release';
+export interface PhaseDefinition {
+    id: PhaseId;
+    name: string;
+    description: string;
+    weeks: [number, number];
+    activeAgents: AgentId[];
+    goals: string[];
+    milestones: MilestoneDefinition[];
+}
+export interface MilestoneDefinition {
+    id: string;
+    name: string;
+    description: string;
+    criteria: MilestoneCriteria[];
+    status: MilestoneStatus;
+    completedAt: number | null;
+}
+export type MilestoneStatus = 'pending' | 'in-progress' | 'completed' | 'blocked';
+export interface MilestoneCriteria {
+    description: string;
+    met: boolean;
+    evidence: string | null;
+}
+export type TopologyType = 'hierarchical-mesh' | 'mesh' | 'hierarchical' | 'centralized';
+export interface SwarmConfig {
+    topology: TopologyType;
+    maxAgents: number;
+    messageTimeout: number;
+    retryAttempts: number;
+    healthCheckInterval: number;
+    loadBalancingStrategy: LoadBalancingStrategy;
+}
+export type LoadBalancingStrategy = 'round-robin' | 'least-loaded' | 'capability-match' | 'priority-based';
+export interface SwarmState {
+    initialized: boolean;
+    topology: TopologyType;
+    agents: Map<AgentId, AgentState>;
+    tasks: Map<TaskId, TaskDefinition>;
+    currentPhase: PhaseId;
+    metrics: SwarmMetrics;
+}
+export interface SwarmMetrics {
+    totalAgents: number;
+    activeAgents: number;
+    idleAgents: number;
+    blockedAgents: number;
+    totalTasks: number;
+    completedTasks: number;
+    failedTasks: number;
+    pendingTasks: number;
+    averageTaskDuration: number;
+    utilization: number;
+    startTime: number;
+    lastUpdate: number;
+}
+export type EventType = 'agent:spawned' | 'agent:status-changed' | 'agent:task-assigned' | 'agent:task-completed' | 'agent:error' | 'task:created' | 'task:queued' | 'task:assigned' | 'task:started' | 'task:completed' | 'task:failed' | 'task:blocked' | 'swarm:initialized' | 'swarm:phase-changed' | 'swarm:milestone-reached' | 'swarm:error';
+export interface SwarmEvent<T = unknown> {
+    id: string;
+    type: EventType;
+    timestamp: number;
+    source: AgentId | 'swarm';
+    payload: T;
+}
+export type EventHandler<T = unknown> = (event: SwarmEvent<T>) => void | Promise<void>;
+export type MessageType = 'task_assignment' | 'task_complete' | 'task_failed' | 'dependency_ready' | 'review_request' | 'status_update' | 'heartbeat' | 'broadcast';
+export interface SwarmMessage<T = unknown> {
+    id: string;
+    type: MessageType;
+    from: AgentId;
+    to: AgentId | 'broadcast';
+    payload: T;
+    timestamp: number;
+    correlationId: string | null;
+}
+export type MessageHandler<T = unknown> = (message: SwarmMessage<T>) => void | Promise<void>;
+export interface PerformanceTargets {
+    flashAttention: {
+        minSpeedup: number;
+        maxSpeedup: number;
+    };
+    agentDbSearch: {
+        minSpeedup: number;
+        maxSpeedup: number;
+    };
+    memoryReduction: {
+        minPercent: number;
+        maxPercent: number;
+    };
+    codeReduction: {
+        targetLines: number;
+        currentLines: number;
+    };
+    startupTime: {
+        targetMs: number;
+    };
+    sonaLearning: {
+        targetMs: number;
+    };
+}
+export declare const V3_PERFORMANCE_TARGETS: PerformanceTargets;
+export type DeepPartial<T> = {
+    [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+export type AsyncCallback<T = void> = () => Promise<T>;
+export interface Result<T, E = Error> {
+    success: boolean;
+    value?: T;
+    error?: E;
+}
+export declare function success<T>(value: T): Result<T>;
+export declare function failure<E = Error>(error: E): Result<never, E>;
+//# sourceMappingURL=types.d.ts.map

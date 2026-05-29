@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-05-16T16:31:28.934Z",
+  "timestamp": "2026-05-29T05:25:44.378Z",
   "projectRoot": "C:\\laragon\\www\\Firmly",
   "structure": {
-    "hasPackageJson": false,
+    "hasPackageJson": true,
     "hasTsConfig": false,
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1778949088935
+  "scannedAt": 1780032344379
 }

@@ -30,7 +30,7 @@ class CaseController extends Controller
         $cases = Cases::where('business_id', $businessId)
             ->where('location_id', $activeLocationId)
             ->when($user->restrictedToOwnCases(), fn($q) => $q->where('assigned_to', $user->id))
-            ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'opposingCounsel:id,name,firm'])
+            ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'opposingCounsel:id,name,firm', 'series:id,reference,name'])
             ->when($request->client_id, fn($q, $cid) => $q->where('client_id', $cid))
             ->when($request->assigned_to, fn($q, $uid) => $q->where('assigned_to', $uid))
             ->when($request->search, fn($q, $s) => $q->where(function ($q) use ($s) {
@@ -155,7 +155,7 @@ class CaseController extends Controller
     {
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
-            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel', 'series:id,reference,name'])
+            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel', 'series:id,reference,name,common_parties'])
             ->findOrFail($id);
 
         if (!$request->user()->canViewCase($case->assigned_to)) {

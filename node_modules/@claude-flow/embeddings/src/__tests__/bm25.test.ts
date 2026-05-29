@@ -1,0 +1,233 @@
+/**
+ * ADR-121 Phase 17 — BM25 tests (with hand-computed values).
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  tokenize,
+  buildBm25Index,
+  bm25Score,
+  bm25TopK,
+  idfOf,
+  queryMeanIdf,
+} from '../bm25.js';
+
+describe('tokenize', () => {
+  it('lowercases + splits on non-alphanumeric + drops <2-char tokens', () => {
+    expect(tokenize('Hello, World! 42!')).toEqual(['hello', 'world', '42']);
+  });
+  it('returns [] on empty/non-string input', () => {
+    expect(tokenize('')).toEqual([]);
+    // Test runtime guard with type-erased inputs (mimics dynamic callers).
+    expect(tokenize(null as unknown as string)).toEqual([]);
+    expect(tokenize(undefined as unknown as string)).toEqual([]);
+  });
+  it('keeps numbers + identifiers', () => {
+    expect(tokenize('CVE-2024-12345 sha256:abc123def')).toEqual(['cve', '2024', '12345', 'sha256', 'abc123def']);
+  });
+});
+
+describe('buildBm25Index', () => {
+  it('handles empty corpus', () => {
+    const idx = buildBm25Index([]);
+    expect(idx.N).toBe(0);
+    expect(idx.avgdl).toBe(0);
+    expect(idx.df.size).toBe(0);
+  });
+
+  it('computes df correctly', () => {
+    const idx = buildBm25Index([
+      { id: '1', text: 'apple banana' },
+      { id: '2', text: 'apple cherry' },
+      { id: '3', text: 'banana cherry date' },
+    ]);
+    expect(idx.df.get('apple')).toBe(2);
+    expect(idx.df.get('banana')).toBe(2);
+    expect(idx.df.get('cherry')).toBe(2);
+    expect(idx.df.get('date')).toBe(1);
+  });
+
+  it('computes avgdl correctly', () => {
+    // Default tokenizer drops <2-char tokens, so use real words.
+    const idx = buildBm25Index([
+      { id: '1', text: 'apple banana cherry' },   // 3 tokens
+      { id: '2', text: 'date elderberry' },        // 2 tokens
+      { id: '3', text: 'fig grape honeydew kiwi' },// 4 tokens
+    ]);
+    expect(idx.avgdl).toBe(3);
+  });
+
+  it('throws on bad params', () => {
+    expect(() => buildBm25Index([], { k1: 0 })).toThrow();
+    expect(() => buildBm25Index([], { b: 1.5 })).toThrow();
+    expect(() => buildBm25Index([], { b: -0.1 })).toThrow();
+  });
+
+  it('respects custom k1 + b', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'a' }], { k1: 2.0, b: 0.5 });
+    expect(idx.k1).toBe(2.0);
+    expect(idx.b).toBe(0.5);
+  });
+});
+
+describe('idfOf', () => {
+  it('returns 0 for tokens not in the corpus', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'apple' }]);
+    expect(idfOf('banana', idx)).toBe(0);
+  });
+
+  it('rare tokens have higher IDF than common tokens', () => {
+    const idx = buildBm25Index([
+      { id: '1', text: 'common rare1' },
+      { id: '2', text: 'common rare2' },
+      { id: '3', text: 'common rare3' },
+      { id: '4', text: 'common rare4' },
+    ]);
+    const commonIdf = idfOf('common', idx);
+    const rareIdf = idfOf('rare1', idx);
+    expect(rareIdf).toBeGreaterThan(commonIdf);
+  });
+
+  it('computes the hand-computed IDF', () => {
+    // N=3, df(apple)=2 → ln((3-2+0.5)/(2+0.5) + 1) = ln(0.6 + 1) = ln(1.6) ≈ 0.4700
+    const idx = buildBm25Index([
+      { id: '1', text: 'apple' },
+      { id: '2', text: 'apple' },
+      { id: '3', text: 'orange' },
+    ]);
+    expect(idfOf('apple', idx)).toBeCloseTo(Math.log(1.6), 6);
+  });
+});
+
+describe('bm25Score', () => {
+  it('returns 0 when query has no token in doc', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'apple banana' }]);
+    const doc = idx.docs[0]!;
+    expect(bm25Score(['cherry'], doc, idx)).toBe(0);
+  });
+
+  it('higher term frequency → higher score', () => {
+    const idx = buildBm25Index([
+      { id: 'low', text: 'apple banana cherry' },
+      { id: 'high', text: 'apple apple apple banana cherry' },
+    ]);
+    const lowScore = bm25Score(['apple'], idx.docs[0]!, idx);
+    const highScore = bm25Score(['apple'], idx.docs[1]!, idx);
+    expect(highScore).toBeGreaterThan(lowScore);
+  });
+
+  it('TF saturation: 1000x term freq does not give 1000x score', () => {
+    const idx = buildBm25Index([
+      { id: 'one', text: 'apple banana' },
+      { id: 'many', text: ('apple '.repeat(1000) + 'banana').trim() },
+    ]);
+    const oneScore = bm25Score(['apple'], idx.docs[0]!, idx);
+    const manyScore = bm25Score(['apple'], idx.docs[1]!, idx);
+    // Ratio should be MUCH less than 1000 (saturation works).
+    expect(manyScore / oneScore).toBeLessThan(10);
+  });
+});
+
+describe('bm25TopK', () => {
+  it('returns [] for k <= 0', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'apple' }]);
+    expect(bm25TopK('apple', idx, 0)).toEqual([]);
+    expect(bm25TopK('apple', idx, -1)).toEqual([]);
+  });
+
+  it('returns [] for empty query', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'apple' }]);
+    expect(bm25TopK('', idx, 5)).toEqual([]);
+  });
+
+  it('returns docs in score-descending order', () => {
+    const idx = buildBm25Index([
+      { id: 'orange-rich', text: 'orange juice fresh' },
+      { id: 'orange-mention', text: 'apple banana orange' },
+      { id: 'orange-heavy', text: 'orange orange orange juice' },
+    ]);
+    const hits = bm25TopK('orange', idx, 3);
+    expect(hits.length).toBe(3);
+    expect(hits[0]!.score).toBeGreaterThanOrEqual(hits[1]!.score);
+    expect(hits[1]!.score).toBeGreaterThanOrEqual(hits[2]!.score);
+  });
+
+  it('only returns docs that share at least one token with the query', () => {
+    const idx = buildBm25Index([
+      { id: 'match', text: 'apple banana' },
+      { id: 'nomatch', text: 'cherry date' },
+    ]);
+    const hits = bm25TopK('apple', idx, 10);
+    expect(hits.length).toBe(1);
+    expect(hits[0]!.id).toBe('match');
+  });
+
+  it('finds rare-term docs that dense embeddings would miss', () => {
+    // The "rare-token" topology: most docs share generic vocab,
+    // one doc has the rare technical term. BM25 should rank it
+    // first when the query mentions the rare term.
+    const idx = buildBm25Index([
+      { id: 'generic-1', text: 'this is general information about the system' },
+      { id: 'generic-2', text: 'general information about systems and how they work' },
+      { id: 'generic-3', text: 'systems and information are common topics' },
+      { id: 'rare-hit', text: 'patches for CVE-2024-12345 were released' },
+      { id: 'generic-4', text: 'the system processes general data' },
+    ]);
+    const hits = bm25TopK('CVE-2024-12345', idx, 3);
+    expect(hits[0]!.id).toBe('rare-hit');
+  });
+
+  it('truncates to k', () => {
+    const idx = buildBm25Index([
+      { id: 'a', text: 'token' },
+      { id: 'b', text: 'token' },
+      { id: 'c', text: 'token' },
+    ]);
+    const hits = bm25TopK('token', idx, 2);
+    expect(hits.length).toBe(2);
+  });
+
+  it('ties resolve by id ascending for determinism', () => {
+    const idx = buildBm25Index([
+      { id: 'b', text: 'apple' },
+      { id: 'a', text: 'apple' },
+    ]);
+    const hits = bm25TopK('apple', idx, 2);
+    expect(hits[0]!.id).toBe('a');
+    expect(hits[1]!.id).toBe('b');
+  });
+});
+
+describe('queryMeanIdf', () => {
+  it('high-IDF query → high mean IDF', () => {
+    const idx = buildBm25Index([
+      { id: '1', text: 'common common common common' },
+      { id: '2', text: 'common common rare-thing' },
+      { id: '3', text: 'common common common' },
+    ]);
+    const meanIdfRare = queryMeanIdf('rare-thing', idx);
+    const meanIdfCommon = queryMeanIdf('common', idx);
+    expect(meanIdfRare).toBeGreaterThan(meanIdfCommon);
+  });
+
+  it('returns 0 when query has no tokens that appear in the corpus', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'apple' }]);
+    expect(queryMeanIdf('banana cherry', idx)).toBe(0);
+  });
+
+  it('ignores zero-IDF tokens (corpus-absent) when averaging', () => {
+    const idx = buildBm25Index([
+      { id: '1', text: 'apple banana' },
+      { id: '2', text: 'apple cherry' },
+    ]);
+    // 'apple' has IDF; 'xyzzy' has 0 IDF. The mean should equal apple's IDF alone, not (idf + 0)/2.
+    const onlyApple = queryMeanIdf('apple', idx);
+    const appleXyzzy = queryMeanIdf('apple xyzzy', idx);
+    expect(appleXyzzy).toBeCloseTo(onlyApple, 6);
+  });
+
+  it('returns 0 for empty query', () => {
+    const idx = buildBm25Index([{ id: '1', text: 'apple' }]);
+    expect(queryMeanIdf('', idx)).toBe(0);
+  });
+});

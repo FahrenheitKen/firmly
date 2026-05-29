@@ -44,6 +44,8 @@ interface CaseItem {
   closed_date: string | null;
   outcome: string | null;
   created_at: string;
+  case_series_id: number | null;
+  series?: { id: number; reference: string; name: string } | null;
 }
 
 interface Client {
@@ -103,6 +105,8 @@ export default function CasesPage() {
   const [filterAssigned, setFilterAssigned] = useState('');
   const [filterClients, setFilterClients] = useState<Client[]>([]);
   const [filterUsers, setFilterUsers] = useState<User[]>([]);
+  const [openSeriesDropdown, setOpenSeriesDropdown] = useState<number | null>(null);
+  const [expandedSeries, setExpandedSeries] = useState<Set<number>>(new Set());
 
   const [step, setStep] = useState<1 | 2>(1);
   const [opposingCounsels, setOpposingCounsels] = useState<OpposingCounsel[]>([]);
@@ -155,16 +159,17 @@ export default function CasesPage() {
   });
 
   useEffect(() => {
-    if (openDropdown === null) return;
+    if (openDropdown === null && openSeriesDropdown === null) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest('.dropdown-menu')) {
         setOpenDropdown(null);
+        setOpenSeriesDropdown(null);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [openDropdown]);
+  }, [openDropdown, openSeriesDropdown]);
 
   useEffect(() => {
     if (!token || !canViewAll) return;
@@ -294,24 +299,11 @@ export default function CasesPage() {
         if (effectiveJudge) fd.set('judge', effectiveJudge);
         files.forEach((f) => fd.append('documents[]', f));
         setUploadProgress(0);
-        let progressVal = 0;
-        const progressTimer = setInterval(() => {
-          progressVal += progressVal < 30 ? 5 : progressVal < 60 ? 3 : progressVal < 85 ? 1 : 0;
-          setUploadProgress(progressVal);
-        }, 100);
-        try {
-          await api.post('/cases', fd, token);
-          clearInterval(progressTimer);
-          setUploadProgress(90);
-          await new Promise((r) => setTimeout(r, 200));
-          setUploadProgress(95);
-          await new Promise((r) => setTimeout(r, 200));
-          setUploadProgress(100);
-          await new Promise((r) => setTimeout(r, 800));
-        } catch (uploadErr) {
-          clearInterval(progressTimer);
-          throw uploadErr;
-        }
+        await api.upload('/cases', fd, token, (loaded, total) => {
+          setUploadProgress(Math.round((loaded / total) * 100));
+        });
+        setUploadProgress(100);
+        await new Promise((r) => setTimeout(r, 600));
       } else {
         const payload: Record<string, unknown> = {
           title: form.title,
@@ -492,6 +484,18 @@ export default function CasesPage() {
     }
   };
 
+  const deleteSeries = async (id: number) => {
+    setOpenSeriesDropdown(null);
+    if (!confirm('Delete this series? Cases will be detached but not deleted.')) return;
+    try {
+      await api.delete(`/case-series/${id}`, token!);
+      fetchCases();
+      showToast('Series deleted', 'success');
+    } catch {
+      showToast('Failed to delete series', 'error');
+    }
+  };
+
   const duplicateCase = async (id: number) => {
     setOpenDropdown(null);
     if (!confirm('Duplicate this case with all its files?')) return;
@@ -570,6 +574,132 @@ export default function CasesPage() {
     }
   };
 
+  // --- Series Case modal ---
+  const [showSeriesModal, setShowSeriesModal] = useState(false);
+  const [seriesForm, setSeriesForm] = useState({
+    title: '', client_id: '', assigned_to: '', client_reference: '', our_reference: '', common_parties: '',
+    court: '', court_number_filed: '', judge: '',
+  });
+  const [savingSeries, setSavingSeries] = useState(false);
+
+  // --- Bulk Upload for Series ---
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [bulkUploadSeriesId, setBulkUploadSeriesId] = useState<number | null>(null);
+  const [bulkUploadSeriesRef, setBulkUploadSeriesRef] = useState('');
+  const [bulkFiles, setBulkFiles] = useState<File[]>([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState(-1);
+  const [bulkExcludeCaseIds, setBulkExcludeCaseIds] = useState<number[]>([]);
+  const [bulkSeriesCases, setBulkSeriesCases] = useState<{ id: number; series_suffix: string | null; our_reference: string | null; title: string }[]>([]);
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
+
+  const openBulkUpload = async (seriesId: number, seriesRef: string) => {
+    setOpenSeriesDropdown(null);
+    setBulkUploadSeriesId(seriesId);
+    setBulkUploadSeriesRef(seriesRef);
+    setBulkFiles([]);
+    setBulkUploadProgress(-1);
+    setBulkExcludeCaseIds([]);
+    setBulkSeriesCases([]);
+    setError('');
+    setShowBulkUploadModal(true);
+    if (token) {
+      try {
+        const res = await api.get<{ series: { active_cases: typeof bulkSeriesCases } }>(`/case-series/${seriesId}`, token);
+        setBulkSeriesCases(res.series.active_cases || []);
+      } catch { /* ignore */ }
+    }
+  };
+
+  const handleBulkUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !bulkUploadSeriesId || bulkFiles.length === 0) return;
+    setBulkUploading(true);
+    setBulkUploadProgress(0);
+    try {
+      const fd = new FormData();
+      bulkFiles.forEach((f) => fd.append('documents[]', f));
+      bulkExcludeCaseIds.forEach((cid) => fd.append('exclude_case_ids[]', String(cid)));
+      await api.upload(`/case-series/${bulkUploadSeriesId}/bulk-document`, fd, token, (loaded, total) => {
+        setBulkUploadProgress(Math.round((loaded / total) * 100));
+      });
+      setBulkUploadProgress(100);
+      await new Promise((r) => setTimeout(r, 600));
+      setShowBulkUploadModal(false);
+      const includedCount = bulkSeriesCases.length - bulkExcludeCaseIds.length;
+      showToast(`Files uploaded to ${includedCount} case${includedCount !== 1 ? 's' : ''} in ${bulkUploadSeriesRef}`, 'success');
+    } catch (err: unknown) {
+      const errObj = err as { errors?: Record<string, string[]>; message?: string };
+      const msg = errObj.errors ? Object.values(errObj.errors).flat().join(', ') : errObj.message || 'Upload failed';
+      setError(msg);
+      showToast(`Bulk upload failed: ${msg}`, 'error');
+    } finally {
+      setBulkUploading(false);
+      setBulkUploadProgress(-1);
+    }
+  };
+
+  const openSeriesCreate = () => {
+    setSeriesForm({ title: '', client_id: '', assigned_to: '', client_reference: '', our_reference: '', common_parties: '', court: '', court_number_filed: '', judge: '' });
+    setError('');
+    setShowSeriesModal(true);
+    if (!token) return;
+    Promise.all([
+      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
+      api.get<{ users: User[] }>('/users?per_page=500', token),
+      api.get<{ business: Record<string, unknown> }>('/business', token),
+    ]).then(([cRes, uRes, bRes]) => {
+      setClients(cRes.clients);
+      setUsers(uRes.users);
+      const b = bRes.business;
+      const refPrefixes = (b.ref_no_prefixes as Record<string, string>) || {};
+      const fmt = refPrefixes.case_number_format || '{FI}/{CP}/{CT}/{N}/{Y}';
+      const counter = (b.case_counter as number) || 0;
+      setBusinessName(b.name as string);
+      setBusinessId(b.id as number);
+      setCaseFormat(fmt);
+      setCaseCounter(counter);
+      setSeriesForm((prev) => ({ ...prev, our_reference: generateOurRef(b.name as string, b.id as number, '', fmt, counter, false, user?.active_location?.city) }));
+    }).catch(() => {});
+  };
+
+  const handleSeriesSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    if (!seriesForm.title.trim()) { setError('Subject is required'); return; }
+    setSavingSeries(true);
+    setError('');
+    try {
+      // 1. Create the series with the our_reference as the base reference
+      const seriesRes = await api.post<{ series: { id: number } }>('/case-series', {
+        reference: seriesForm.our_reference,
+        name: seriesForm.title,
+        common_parties: seriesForm.common_parties || null,
+      }, token);
+      const seriesId = seriesRes.series.id;
+
+      // 2. Create the first case inside the series
+      await api.post(`/case-series/${seriesId}/cases`, {
+        title: seriesForm.title,
+        client_id: seriesForm.client_id || null,
+        assigned_to: seriesForm.assigned_to || null,
+        client_reference: seriesForm.client_reference || null,
+        court: seriesForm.court || null,
+        court_number_filed: seriesForm.court_number_filed || null,
+        judge: seriesForm.judge || null,
+      }, token);
+
+      setShowSeriesModal(false);
+      fetchCases();
+      showToast('Series case created successfully', 'success');
+    } catch (err: unknown) {
+      const e = err as { errors?: Record<string, string[]>; message?: string };
+      setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to create series case');
+    } finally {
+      setSavingSeries(false);
+    }
+  };
+
   const inputClass = 'w-full px-3.5 py-2.5 bg-card-bg border border-border rounded-xl focus:outline-none focus:border-primary focus:ring-0 text-sm transition-colors';
 
   return (
@@ -579,9 +709,14 @@ export default function CasesPage() {
         description="Manage firm cases"
         action={
           canCreate ? (
-            <button onClick={openCreate} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
-              + Add Case
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={openCreate} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
+                + Add Case
+              </button>
+              <button onClick={openSeriesCreate} className="inline-flex items-center gap-1.5 px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 text-sm font-medium">
+                + Series Case
+              </button>
+            </div>
           ) : null
         }
       />
@@ -640,8 +775,113 @@ export default function CasesPage() {
               </tr>
             </thead>
             <tbody>
-              {cases.map((c) => (
-                <tr key={c.id} className="border-b border-border last:border-0 hover:bg-gray-50">
+              {(() => {
+                // Group cases: series cases grouped under their series, standalone cases shown flat
+                const seriesMap = new Map<number, { series: { id: number; reference: string; name: string }; cases: CaseItem[] }>();
+                const standaloneCases: CaseItem[] = [];
+                const rows: Array<{ type: 'series-header'; seriesId: number; series: { id: number; reference: string; name: string }; count: number } | { type: 'case'; case: CaseItem; indent: boolean }> = [];
+
+                cases.forEach((c) => {
+                  if (c.case_series_id && c.series) {
+                    const group = seriesMap.get(c.case_series_id);
+                    if (group) {
+                      group.cases.push(c);
+                    } else {
+                      seriesMap.set(c.case_series_id, { series: c.series, cases: [c] });
+                    }
+                  } else {
+                    standaloneCases.push(c);
+                  }
+                });
+
+                // Build row list: standalone cases first, then series groups
+                standaloneCases.forEach((c) => rows.push({ type: 'case', case: c, indent: false }));
+                seriesMap.forEach((group, seriesId) => {
+                  rows.push({ type: 'series-header', seriesId, series: group.series, count: group.cases.length });
+                  if (expandedSeries.has(seriesId)) {
+                    group.cases.forEach((c) => rows.push({ type: 'case', case: c, indent: true }));
+                  }
+                });
+
+                return rows.map((row) => {
+                  if (row.type === 'series-header') {
+                    return (
+                      <tr
+                        key={`series-${row.seriesId}`}
+                        className="border-b border-border bg-primary/5"
+                      >
+                        <td className="px-2 sm:px-4 py-3 relative">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setOpenSeriesDropdown(openSeriesDropdown === row.seriesId ? null : row.seriesId); setOpenDropdown(null); }}
+                            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                          >
+                            <span className="hidden sm:inline">Action</span>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          {openSeriesDropdown === row.seriesId && (
+                            <div className="dropdown-menu absolute left-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
+                              <button onClick={() => { setOpenSeriesDropdown(null); router.push(`/dashboard/series/${row.seriesId}`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-primary hover:bg-primary/5 transition-colors">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                View
+                              </button>
+                              {canUpdate && (
+                                <button onClick={() => { setOpenSeriesDropdown(null); router.push(`/dashboard/series/${row.seriesId}`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-accent hover:bg-accent/5 transition-colors">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                  Edit
+                                </button>
+                              )}
+                              {canUpdate && (
+                                <button onClick={() => openBulkUpload(row.seriesId, row.series.reference)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                  Bulk Upload
+                                </button>
+                              )}
+                              {canDelete && (
+                                <>
+                                  <hr className="my-1 border-border" />
+                                  <button onClick={() => deleteSeries(row.seriesId)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger hover:bg-danger/5 transition-colors">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    Delete
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td
+                          className="px-2 sm:px-4 py-3 cursor-pointer select-none"
+                          colSpan={3}
+                          onClick={() => setExpandedSeries((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(row.seriesId)) next.delete(row.seriesId);
+                            else next.add(row.seriesId);
+                            return next;
+                          })}
+                        >
+                          <div className="flex items-center gap-2">
+                            <svg className={`w-4 h-4 text-primary shrink-0 transition-transform ${expandedSeries.has(row.seriesId) ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                            <svg className="w-4 h-4 text-primary shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                            <span className="text-sm font-semibold text-primary font-mono">{row.series.reference}</span>
+                            <span className="text-xs text-muted">{row.series.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-3 hidden md:table-cell" />
+                        <td className="px-2 sm:px-4 py-3">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">{row.count} case{row.count !== 1 ? 's' : ''}</span>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const c = row.case;
+                  return (
+                    <tr key={c.id} className={`border-b border-border last:border-0 hover:bg-gray-50 ${row.indent ? 'bg-gray-50/50' : ''}`}>
                   <td className="px-2 sm:px-4 py-3 relative">
                     <button
                       onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === c.id ? null : c.id); }}
@@ -695,7 +935,10 @@ export default function CasesPage() {
                     )}
                   </td>
                   <td className="px-2 sm:px-4 py-3">
-                    <div className="text-xs font-mono text-muted truncate">{c.our_reference || c.case_number}</div>
+                    <div className={`text-xs font-mono text-muted truncate ${row.indent ? 'pl-5' : ''}`}>
+                      {row.indent && <span className="text-primary/40 mr-1">&#x2514;</span>}
+                      {c.our_reference || c.case_number}
+                    </div>
                     <div className="text-xs text-muted truncate sm:hidden mt-0.5">{clientName(c)}</div>
                   </td>
                   <td className="px-2 sm:px-4 py-3 text-muted truncate max-w-[140px] hidden sm:table-cell">{clientName(c)}</td>
@@ -704,8 +947,10 @@ export default function CasesPage() {
                   <td className="px-2 sm:px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[c.status] || ''}`}>{c.status}</span>
                   </td>
-                </tr>
-              ))}
+                    </tr>
+                  );
+                });
+              })()}
             </tbody>
           </table>
           <TablePagination
@@ -1281,6 +1526,165 @@ export default function CasesPage() {
             <button type="button" onClick={() => { setShowEventModal(false); setEventCaseId(null); setError(''); }} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
             <button type="submit" disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
               {saving ? 'Adding...' : 'Add Event'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={showSeriesModal} onClose={() => setShowSeriesModal(false)} title="Add Series Case" size="md">
+        <form onSubmit={handleSeriesSubmit} className="space-y-4">
+          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Subject *</label>
+            <input value={seriesForm.title} onChange={(e) => setSeriesForm({ ...seriesForm, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Series case subject" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Defendant (Common Party)</label>
+            <input value={seriesForm.common_parties} onChange={(e) => setSeriesForm({ ...seriesForm, common_parties: e.target.value.toUpperCase() })} className={inputClass} placeholder="Defendant (Common Party)" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <SearchableSelect
+              label="Client"
+              value={seriesForm.client_id}
+              onChange={(v) => {
+                setSeriesForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, false, user?.active_location?.city) }));
+              }}
+              options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
+              placeholder="Search client..."
+            />
+            <SearchableSelect
+              label="Assigned To"
+              value={seriesForm.assigned_to}
+              onChange={(v) => setSeriesForm((prev) => ({ ...prev, assigned_to: v }))}
+              options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+              placeholder="Search user..."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Client Reference</label>
+              <input value={seriesForm.client_reference} onChange={(e) => setSeriesForm({ ...seriesForm, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Our Reference</label>
+              <input value={seriesForm.our_reference} onChange={(e) => setSeriesForm({ ...seriesForm, our_reference: e.target.value })} className={inputClass} placeholder="Our reference" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Station</label>
+              <input value={seriesForm.court} onChange={(e) => setSeriesForm({ ...seriesForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Before Court No</label>
+              <input value={seriesForm.court_number_filed} onChange={(e) => setSeriesForm({ ...seriesForm, court_number_filed: e.target.value.toUpperCase() })} className={inputClass} placeholder="Before court no" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
+              <input value={seriesForm.judge} onChange={(e) => setSeriesForm({ ...seriesForm, judge: e.target.value })} className={inputClass} placeholder="Magistrate or Judge name" />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <button type="button" onClick={() => setShowSeriesModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
+            <button type="submit" disabled={savingSeries} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+              {savingSeries ? 'Creating...' : 'Create Series Case'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={showBulkUploadModal} onClose={() => { setShowBulkUploadModal(false); setBulkUploadSeriesId(null); setBulkFiles([]); setBulkUploadProgress(-1); setError(''); }} title={`Bulk Upload — ${bulkUploadSeriesRef}`} size="md">
+        <form onSubmit={handleBulkUpload} className="space-y-4">
+          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
+
+          {bulkSeriesCases.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium mb-2">Include Cases</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {bulkSeriesCases.map(c => {
+                  const excluded = bulkExcludeCaseIds.includes(c.id);
+                  return (
+                    <label key={c.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${excluded ? 'border-border/60 bg-background/50 text-muted' : 'border-primary/30 bg-primary/5'}`}>
+                      <input type="checkbox" checked={!excluded} onChange={() => setBulkExcludeCaseIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} className="w-4 h-4 rounded text-primary" />
+                      <span className="font-mono text-xs">{c.series_suffix || '?'}</span>
+                      <span className="truncate">{c.our_reference || c.title}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <input
+              ref={bulkFileInputRef}
+              type="file"
+              multiple
+              onChange={(e) => {
+                const selected = Array.from(e.target.files || []).filter((f) => f.name && f.size > 0);
+                if (selected.length > 0) {
+                  setBulkFiles((prev) => [...prev, ...selected]);
+                }
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+            <div
+              onClick={(e) => { e.stopPropagation(); bulkFileInputRef.current?.click(); }}
+              onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-primary', 'bg-primary/5'); }}
+              onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); }}
+              onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); if (e.dataTransfer.files.length) setBulkFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files).filter((f) => f.name && f.size > 0)]); }}
+              className="flex flex-col items-center justify-center w-full border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:text-primary transition-colors text-center"
+            >
+              <svg className="w-6 h-6 mb-1.5 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+              <span className="text-sm text-muted">Click or drag files here</span>
+              <span className="text-xs text-muted mt-0.5">Files will be added to every case in the series</span>
+            </div>
+            {bulkFiles.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {bulkFiles.map((f, i) => {
+                  const sizeKB = f.size / 1024;
+                  const sizeLabel = sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB.toFixed(0)} KB`;
+                  return (
+                    <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-border rounded-lg">
+                      <svg className="w-4 h-4 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      <span className="flex-1 text-sm truncate">{f.name}</span>
+                      <span className="text-xs text-muted shrink-0">{sizeLabel}</span>
+                      {!bulkUploading && (
+                        <button type="button" onClick={() => setBulkFiles((prev) => prev.filter((_, idx) => idx !== i))} className="p-1 text-danger hover:bg-danger/5 rounded transition-colors shrink-0">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="text-xs text-muted text-right">{bulkFiles.length} file{bulkFiles.length !== 1 ? 's' : ''} &middot; {(() => { const total = bulkFiles.reduce((s, f) => s + f.size, 0) / 1024; return total >= 1024 ? `${(total / 1024).toFixed(1)} MB` : `${total.toFixed(0)} KB`; })()}</div>
+              </div>
+            )}
+          </div>
+
+          {bulkUploadProgress >= 0 && (
+            <div className="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-medium">{bulkUploadProgress < 100 ? 'Uploading to all cases...' : 'Done!'}</span>
+                <span className="text-sm font-medium text-primary">{bulkUploadProgress}%</span>
+              </div>
+              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div className={`h-2 rounded-full transition-all duration-300 ${bulkUploadProgress >= 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${Math.min(bulkUploadProgress, 100)}%` }} />
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <button type="button" onClick={() => { setShowBulkUploadModal(false); setBulkUploadSeriesId(null); setBulkFiles([]); setBulkUploadProgress(-1); setError(''); }} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
+            <button type="submit" disabled={bulkUploading || bulkFiles.length === 0} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+              {bulkUploading ? `Uploading ${bulkUploadProgress}%` : `Upload to ${bulkSeriesCases.length - bulkExcludeCaseIds.length} Case${(bulkSeriesCases.length - bulkExcludeCaseIds.length) !== 1 ? 's' : ''}`}
             </button>
           </div>
         </form>

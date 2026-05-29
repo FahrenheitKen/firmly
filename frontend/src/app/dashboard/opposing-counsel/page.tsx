@@ -133,7 +133,7 @@ export default function OpposingCounselPage() {
           {search ? 'No opposing counsels match your search.' : 'No opposing counsels yet.'}
         </div>
       ) : (
-        <div className="bg-card-bg rounded-xl border border-border overflow-visible">
+        <div className="bg-card-bg rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-gray-50">

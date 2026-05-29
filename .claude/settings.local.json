@@ -212,11 +212,34 @@
       "Bash(python3 -m json.tool)",
       "Read(//etc/php/8.2/fpm/**)",
       "Read(//etc/php/8.2/cli/**)",
-      "Bash(supervisorctl status *)"
+      "Bash(supervisorctl status *)",
+      "Bash(node:*)",
+      "Bash(npm list:*)",
+      "Bash(claude mcp:*)",
+      "Bash(ruflo --version)",
+      "Bash(where ruflo:*)",
+      "Bash(ruflo init:*)",
+      "Bash(ruflo mcp:*)",
+      "Bash(ruflo --list)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); projects=d.get\\('projects',{}\\); [print\\(k,'->',list\\(v.get\\('mcpServers',{}\\).keys\\(\\)\\)\\) for k,v in projects.items\\(\\) if 'Firmly' in k]\")",
+      "Read(//c/Users/HP/**)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(json.dumps\\(v.get\\('mcpServers',{}\\),indent=2\\)\\) for k,v in d.get\\('projects',{}\\).items\\(\\) if 'Firmly' in k]\")",
+      "Bash(ruflo --help)",
+      "Bash(cat /c/Users/HP/.claude/ide/*.json)",
+      "Bash(npm update:*)",
+      "Bash(/c/Users/HP/AppData/Roaming/npm/ruflo --version)",
+      "Bash(/c/laragon/bin/nodejs/node-v22/npm update:*)",
+      "Bash(/c/laragon/bin/nodejs/node-v22/ruflo:*)",
+      "Bash(/c/Users/HP/AppData/Roaming/npm/ruflo.cmd mcp:*)",
+      "mcp__ruflo__system_status",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers',{}\\), indent=2\\)\\)\")",
+      "Bash(tasklist)",
+      "mcp__claude-flow__system_status"
     ]
   },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
-    "claude-flow"
+    "claude-flow",
+    "ruflo"
   ]
 }

@@ -177,7 +177,10 @@ export default function LocationsPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-2 sm:px-4 py-3 font-medium truncate">{loc.name}</td>
+                  <td className="px-2 sm:px-4 py-3 font-medium truncate">
+                    {loc.name}
+                    <div className="text-xs text-muted sm:hidden mt-0.5">{loc.users_count ?? 0} users &middot; {loc.clients_count ?? 0} clients &middot; {loc.cases_count ?? 0} cases</div>
+                  </td>
                   <td className="px-2 sm:px-4 py-3 text-muted hidden lg:table-cell">{loc.location_id || '—'}</td>
                   <td className="px-2 sm:px-4 py-3 text-muted max-w-[200px] truncate hidden md:table-cell" title={[loc.landmark, loc.city, loc.country, loc.zip_code].filter(Boolean).join(', ')}>
                     {[loc.landmark, loc.city, loc.country, loc.zip_code].filter(Boolean).join(', ')}

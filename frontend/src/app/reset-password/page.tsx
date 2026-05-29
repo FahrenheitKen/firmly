@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
@@ -8,14 +8,8 @@ import { api } from '@/lib/api';
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const token = searchParams.get('token') || '';
-  const email = searchParams.get('email') || '';
-
-  useEffect(() => {
-    if (token || email) {
-      window.history.replaceState({}, '', '/reset-password');
-    }
-  }, [token, email]);
+  const [token] = useState(() => searchParams.get('token') || '');
+  const [email] = useState(() => searchParams.get('email') || '');
 
   const [password, setPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');

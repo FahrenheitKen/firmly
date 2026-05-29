@@ -96,7 +96,7 @@ export default function SeriesPage() {
   return (
     <>
       <PageHeader
-        title="Case Series"
+        title="Series Cases"
         description="Group related cases for bulk actions"
         action={canCreate ? (
           <button onClick={openCreate} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
@@ -124,13 +124,13 @@ export default function SeriesPage() {
       ) : series.length === 0 ? (
         <div className="text-center py-16 text-muted">{search ? 'No series match your search.' : 'No case series yet. Create one to group related cases.'}</div>
       ) : (
-        <div className="bg-card-bg rounded-xl border border-border overflow-visible">
+        <div className="bg-card-bg rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Reference</th>
                 <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Common Parties</th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Defendant</th>
                 <th className="text-center px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-20">Cases</th>
                 <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Parent</th>
                 <th className="text-right px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-24">Actions</th>

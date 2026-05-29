@@ -87,14 +87,14 @@ export default function RolesPage() {
           <table className="w-full">
             <thead>
               <tr className="bg-gradient-to-r from-gray-50 to-white border-b border-border">
-                <th className="text-left px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted">Role</th>
-                <th className="text-right px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted">Action</th>
+                <th className="text-left px-3 sm:px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted">Role</th>
+                <th className="text-right px-3 sm:px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted">Action</th>
               </tr>
             </thead>
             <tbody>
               {roles.map((role, i) => (
                 <tr key={role.id} className={`border-b border-border last:border-0 transition-colors hover:bg-gray-50/80 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
-                  <td className="px-6 py-4">
+                  <td className="px-3 sm:px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold">
                         {role.name.charAt(0).toUpperCase()}
@@ -105,15 +105,15 @@ export default function RolesPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 sm:px-6 py-4">
                     <div className="flex gap-2 justify-end">
-                      <button onClick={() => openEdit(role)} className="inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 bg-accent/10 border border-accent/20 rounded-lg hover:bg-accent/20 hover:border-accent/30 transition-all text-accent shadow-sm">
+                      <button onClick={() => openEdit(role)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2 sm:px-3.5 py-2 bg-accent/10 border border-accent/20 rounded-lg hover:bg-accent/20 hover:border-accent/30 transition-all text-accent shadow-sm">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        Edit
+                        <span className="hidden sm:inline">Edit</span>
                       </button>
-                      <button onClick={() => setDeleteTarget(role.id)} className="inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 bg-danger/5 border border-danger/20 rounded-lg hover:bg-danger/10 hover:border-danger/30 transition-all text-danger shadow-sm">
+                      <button onClick={() => setDeleteTarget(role.id)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2 sm:px-3.5 py-2 bg-danger/5 border border-danger/20 rounded-lg hover:bg-danger/10 hover:border-danger/30 transition-all text-danger shadow-sm">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        Delete
+                        <span className="hidden sm:inline">Delete</span>
                       </button>
                     </div>
                   </td>

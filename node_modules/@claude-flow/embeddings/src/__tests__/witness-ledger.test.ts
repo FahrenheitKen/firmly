@@ -1,0 +1,232 @@
+/**
+ * ADR-121 Phase 18 — Witness ledger (chain) tests.
+ *
+ * Covers:
+ *  - Empty ledger verifies as valid (zero entries, zero failures)
+ *  - Single-entry chain (genesis with prevContentHash=null)
+ *  - Multi-entry chain — sequence + prev-hash linkage
+ *  - Tamper detection at every position (genesis, middle, tail)
+ *  - Sequence mismatch detection
+ *  - Wrong version rejected
+ *  - Verification result reports the FIRST failure position
+ *  - Same signer key carries across appends
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  appendToLedger,
+  verifyEntry,
+  verifyLedger,
+  generateLedgerKeypair,
+  type BenchmarkLedger,
+} from '../witness-ledger.js';
+
+function input(name: string, ts: string, results: unknown) {
+  return {
+    benchmark: name,
+    timestamp: ts,
+    commit: `commit-${name}`,
+    model: 'test-model',
+    corpus: { id: 'fp-corpus', size: 10 },
+    queries: { id: 'fp-queries', count: 3 },
+    results,
+  };
+}
+
+describe('appendToLedger — chain construction', () => {
+  it('initializes a fresh ledger with a single genesis entry', () => {
+    const { ledger, entry } = appendToLedger(undefined, input('b1', '2026-01-01T00:00:00Z', { recall: 0.5 }));
+    expect(ledger.version).toBe(1);
+    expect(ledger.entries.length).toBe(1);
+    expect(entry.sequence).toBe(1);
+    expect(entry.prevContentHash).toBeNull();
+  });
+
+  it('chains a second entry to the genesis', () => {
+    const kp = generateLedgerKeypair();
+    const { ledger: l1, entry: e1 } = appendToLedger(undefined, input('b1', '2026-01-01T00:00:00Z', { recall: 0.5 }), kp);
+    const { ledger: l2, entry: e2 } = appendToLedger(l1, input('b2', '2026-01-02T00:00:00Z', { recall: 0.7 }), kp);
+
+    expect(l2.entries.length).toBe(2);
+    expect(e2.sequence).toBe(2);
+    expect(e2.prevContentHash).toBe(e1.contentHash);
+  });
+
+  it('three-entry chain has correct sequence + links', () => {
+    const kp = generateLedgerKeypair();
+    let ledger: BenchmarkLedger | undefined;
+    const hashes: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const result = appendToLedger(ledger, input(`b${i}`, `2026-01-0${i + 1}T00:00:00Z`, { i }), kp);
+      ledger = result.ledger;
+      hashes.push(result.entry.contentHash);
+    }
+    expect(ledger!.entries.length).toBe(3);
+    expect(ledger!.entries[0]!.prevContentHash).toBeNull();
+    expect(ledger!.entries[1]!.prevContentHash).toBe(hashes[0]);
+    expect(ledger!.entries[2]!.prevContentHash).toBe(hashes[1]);
+    expect(ledger!.entries.map(e => e.sequence)).toEqual([1, 2, 3]);
+  });
+
+  it('same keypair → same publicKey on every entry', () => {
+    const kp = generateLedgerKeypair();
+    let ledger: BenchmarkLedger | undefined;
+    const pubs: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = appendToLedger(ledger, input(`b${i}`, `2026-01-0${i + 1}T00:00:00Z`, { i }), kp);
+      ledger = r.ledger;
+      pubs.push(r.entry.publicKey);
+    }
+    expect(new Set(pubs).size).toBe(1);
+  });
+
+  it('no keypair → fresh ephemeral key per entry (different publicKeys)', () => {
+    let ledger: BenchmarkLedger | undefined;
+    const pubs: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = appendToLedger(ledger, input(`b${i}`, `2026-01-0${i + 1}T00:00:00Z`, { i }));
+      ledger = r.ledger;
+      pubs.push(r.entry.publicKey);
+    }
+    expect(new Set(pubs).size).toBe(3);
+  });
+});
+
+describe('verifyLedger — happy path', () => {
+  it('empty ledger is valid', () => {
+    const result = verifyLedger({ version: 1, entries: [] });
+    expect(result.valid).toBe(true);
+    expect(result.entryCount).toBe(0);
+    expect(result.firstFailureAt).toBe(-1);
+  });
+
+  it('single-entry chain verifies', () => {
+    const { ledger } = appendToLedger(undefined, input('b1', '2026-01-01T00:00:00Z', { r: 1 }));
+    const result = verifyLedger(ledger);
+    expect(result.valid).toBe(true);
+    expect(result.entryCount).toBe(1);
+  });
+
+  it('multi-entry chain verifies', () => {
+    const kp = generateLedgerKeypair();
+    let ledger: BenchmarkLedger | undefined;
+    for (let i = 0; i < 5; i++) {
+      ledger = appendToLedger(ledger, input(`b${i}`, `2026-01-0${i + 1}T00:00:00Z`, { i }), kp).ledger;
+    }
+    const result = verifyLedger(ledger!);
+    expect(result.valid).toBe(true);
+    expect(result.entryCount).toBe(5);
+  });
+
+  it('unknown version rejected', () => {
+    const result = verifyLedger({ version: 99 } as unknown as BenchmarkLedger);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/version/);
+  });
+});
+
+describe('verifyLedger — tamper detection', () => {
+  function buildChain(n: number): BenchmarkLedger {
+    const kp = generateLedgerKeypair();
+    let ledger: BenchmarkLedger | undefined;
+    for (let i = 0; i < n; i++) {
+      ledger = appendToLedger(ledger, input(`b${i}`, `2026-01-0${i + 1}T00:00:00Z`, { i }), kp).ledger;
+    }
+    return ledger!;
+  }
+
+  it('detects tampering at the genesis entry', () => {
+    const ledger = buildChain(3);
+    const tampered: BenchmarkLedger = {
+      ...ledger,
+      entries: [
+        { ...ledger.entries[0]!, results: { i: 999 } }, // tamper genesis
+        ledger.entries[1]!,
+        ledger.entries[2]!,
+      ],
+    };
+    const result = verifyLedger(tampered);
+    expect(result.valid).toBe(false);
+    expect(result.firstFailureAt).toBe(0);
+  });
+
+  it('detects tampering at a middle entry', () => {
+    const ledger = buildChain(3);
+    const tampered: BenchmarkLedger = {
+      ...ledger,
+      entries: [
+        ledger.entries[0]!,
+        { ...ledger.entries[1]!, results: { i: 999 } },
+        ledger.entries[2]!,
+      ],
+    };
+    const result = verifyLedger(tampered);
+    expect(result.valid).toBe(false);
+    expect(result.firstFailureAt).toBe(1);
+  });
+
+  it('detects tampering at the tail entry', () => {
+    const ledger = buildChain(3);
+    const tampered: BenchmarkLedger = {
+      ...ledger,
+      entries: [
+        ledger.entries[0]!,
+        ledger.entries[1]!,
+        { ...ledger.entries[2]!, results: { i: 999 } },
+      ],
+    };
+    const result = verifyLedger(tampered);
+    expect(result.valid).toBe(false);
+    expect(result.firstFailureAt).toBe(2);
+  });
+
+  it('detects removed entry (sequence mismatch)', () => {
+    const ledger = buildChain(3);
+    const tampered: BenchmarkLedger = {
+      ...ledger,
+      entries: [ledger.entries[0]!, ledger.entries[2]!], // skip middle
+    };
+    const result = verifyLedger(tampered);
+    expect(result.valid).toBe(false);
+    // The first wrong entry is at index 1 (sequence expected 2, got 3 OR bad prevHash)
+    expect(result.firstFailureAt).toBe(1);
+  });
+
+  it('detects swapped entries', () => {
+    const ledger = buildChain(3);
+    const tampered: BenchmarkLedger = {
+      ...ledger,
+      entries: [ledger.entries[1]!, ledger.entries[0]!, ledger.entries[2]!],
+    };
+    const result = verifyLedger(tampered);
+    expect(result.valid).toBe(false);
+  });
+
+  it('detects forged prevContentHash with otherwise valid signature', () => {
+    const ledger = buildChain(3);
+    const tampered: BenchmarkLedger = {
+      ...ledger,
+      entries: [
+        ledger.entries[0]!,
+        { ...ledger.entries[1]!, prevContentHash: 'ff'.repeat(32) },
+        ledger.entries[2]!,
+      ],
+    };
+    const result = verifyLedger(tampered);
+    expect(result.valid).toBe(false);
+    expect(result.firstFailureAt).toBe(1);
+  });
+});
+
+describe('verifyEntry — single-entry signature check', () => {
+  it('valid entry verifies', () => {
+    const { entry } = appendToLedger(undefined, input('b1', '2026-01-01T00:00:00Z', { r: 1 }));
+    expect(verifyEntry(entry)).toBe(true);
+  });
+
+  it('tampered entry fails', () => {
+    const { entry } = appendToLedger(undefined, input('b1', '2026-01-01T00:00:00Z', { r: 1 }));
+    const tampered = { ...entry, results: { r: 999 } };
+    expect(verifyEntry(tampered)).toBe(false);
+  });
+});

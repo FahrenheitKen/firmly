@@ -79,7 +79,7 @@ interface CaseItem {
   outcome: string | null;
   case_series_id: number | null;
   series_suffix: string | null;
-  series?: { id: number; reference: string; name: string } | null;
+  series?: { id: number; reference: string; name: string; common_parties: string | null } | null;
   created_at: string;
 }
 
@@ -723,11 +723,14 @@ export default function CaseDetailPage() {
             </svg>
           </button>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold">{caseItem.title}</h1>
               <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[caseItem.status] || ''}`}>{caseItem.status}</span>
               {caseItem.case_type && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">{caseItem.case_type}</span>
+              )}
+              {caseItem.series?.common_parties && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Defendant: {caseItem.series.common_parties}</span>
               )}
             </div>
             <p className="text-sm text-muted">{caseItem.case_number}</p>
@@ -755,7 +758,7 @@ export default function CaseDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-card-bg rounded-xl border border-border p-5">
           <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Case Details</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Our Reference</p>
               <p className="text-sm mt-0.5 font-mono">{caseItem.our_reference || '-'}</p>
