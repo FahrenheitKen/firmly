@@ -48,6 +48,16 @@ class CaseSeries extends Model
         return $this->hasMany(Cases::class, 'case_series_id')->whereNull('deleted_at');
     }
 
+    public function client()
+    {
+        return $this->belongsTo(Client::class);
+    }
+
+    public function assignedTo()
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
     public function createdByUser()
     {
         return $this->belongsTo(User::class, 'created_by');

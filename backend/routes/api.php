@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\Route;
 // Public routes
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
-Route::post('/forgot-password', [PasswordResetController::class, 'sendResetLink'])->middleware('throttle:2,60');
+Route::post('/forgot-password', [PasswordResetController::class, 'sendResetLink'])->middleware('throttle:5,60');
 Route::post('/reset-password', [PasswordResetController::class, 'resetPassword'])->middleware('throttle:5,1');
 Route::get('/currencies', [BusinessController::class, 'currencies']);
 

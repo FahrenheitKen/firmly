@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -52,6 +52,7 @@ export default function SeriesDetailPage() {
   const canUpdate = isOwner || can('case.update');
   const { toast } = useToast();
   const formatDate = useFormatDate();
+  const router = useRouter();
   const params = useParams();
   const id = params.id as string;
 
@@ -89,6 +90,30 @@ export default function SeriesDetailPage() {
   const [bulkUploadProgress, setBulkUploadProgress] = useState(-1);
   const [bulkExcludeCaseIds, setBulkExcludeCaseIds] = useState<number[]>([]);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [openCaseDropdown, setOpenCaseDropdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (openCaseDropdown === null) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.case-dropdown-menu')) setOpenCaseDropdown(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openCaseDropdown]);
+
+  const duplicateCase = async (caseId: number) => {
+    setOpenCaseDropdown(null);
+    if (!token) return;
+    try {
+      await api.post(`/cases/${caseId}/duplicate`, { series_id: Number(id) }, token);
+      toast('Case duplicated', 'success');
+      fetchSeries();
+    } catch (err: unknown) {
+      toast((err as { message?: string }).message || 'Failed to duplicate case', 'error');
+    }
+  };
 
   const fetchSeries = useCallback(async () => {
     if (!token) return;
@@ -314,34 +339,70 @@ export default function SeriesDetailPage() {
         <div className="mb-4 p-3 bg-gray-50 border border-border rounded-xl text-sm text-muted">{series.notes}</div>
       )}
 
-      <div className="bg-card-bg rounded-xl border border-border overflow-x-auto">
+      <div className="bg-card-bg rounded-xl border border-border overflow-visible">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <p className="text-sm font-medium">{series.active_cases.length} Case{series.active_cases.length !== 1 ? 's' : ''} in Series</p>
         </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-gray-50">
+              <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider text-left">Actions</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-16">Suffix</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Our Reference</th>
-              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Subject</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Case Number</th>
-              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Plaintiff</th>
+              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Client</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Assigned To</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-24">Status</th>
-              <th className="text-right px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-28">Actions</th>
             </tr>
           </thead>
           <tbody>
             {series.active_cases.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted">No cases in this series yet. Add one to get started.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No cases in this series yet. Add one to get started.</td></tr>
             )}
             {series.active_cases.map((c) => (
               <tr key={c.id} className="border-b border-border last:border-0 hover:bg-gray-50">
+                <td className="px-2 sm:px-4 py-3 relative">
+                  <button
+                    onClick={() => setOpenCaseDropdown(openCaseDropdown === c.id ? null : c.id)}
+                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                  >
+                    <span className="hidden sm:inline">Action</span>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {openCaseDropdown === c.id && (
+                    <div className="case-dropdown-menu absolute left-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-border z-50 py-1 text-left">
+                      <button onClick={() => { setOpenCaseDropdown(null); router.push(`/dashboard/cases/${c.id}`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-primary hover:bg-primary/5 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                        View
+                      </button>
+                      {canUpdate && (
+                        <button onClick={() => { setOpenCaseDropdown(null); router.push(`/dashboard/cases/${c.id}?edit=true`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-accent hover:bg-accent/5 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          Edit
+                        </button>
+                      )}
+                      <button onClick={() => { setOpenCaseDropdown(null); router.push(`/dashboard/cases/${c.id}?tab=files&action=upload`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-gray-50 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        Add File
+                      </button>
+                      <button onClick={() => { setOpenCaseDropdown(null); router.push(`/dashboard/cases/${c.id}?tab=events&action=add`); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-gray-50 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        Add Event
+                      </button>
+                      <hr className="my-1 border-border" />
+                      <button onClick={() => duplicateCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-gray-50 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                        Duplicate
+                      </button>
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold">{c.series_suffix || '-'}</span>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs">{c.our_reference || '-'}</td>
-                <td className="px-4 py-3 hidden sm:table-cell text-sm truncate max-w-[200px]">{c.title}</td>
                 <td className="px-4 py-3 hidden sm:table-cell text-xs">{c.case_number || '-'}</td>
                 <td className="px-4 py-3 hidden md:table-cell">{clientName(c.client)}</td>
                 <td className="px-4 py-3 hidden lg:table-cell text-muted">
@@ -349,9 +410,6 @@ export default function SeriesDetailPage() {
                 </td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[c.status] || 'bg-gray-100 text-gray-700'}`}>{c.status}</span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Link href={`/dashboard/cases/${c.id}`} className="text-xs font-medium px-2 py-1.5 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 text-primary">View</Link>
                 </td>
               </tr>
             ))}

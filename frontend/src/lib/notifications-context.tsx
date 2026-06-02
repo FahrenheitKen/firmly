@@ -80,17 +80,31 @@ function playDing(): void {
   try {
     const ctx = sharedAudioCtx;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.setValueAtTime(660, ctx.currentTime + 0.12);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.3);
+    const t = ctx.currentTime;
+
+    // First beep — high pitch
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, t);
+    gain1.gain.setValueAtTime(0.0001, t);
+    gain1.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
+    gain1.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    osc1.connect(gain1).connect(ctx.destination);
+    osc1.start(t);
+    osc1.stop(t + 0.2);
+
+    // Second beep — higher pitch, after short gap
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1100, t + 0.25);
+    gain2.gain.setValueAtTime(0.0001, t + 0.25);
+    gain2.gain.exponentialRampToValueAtTime(0.6, t + 0.27);
+    gain2.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    osc2.connect(gain2).connect(ctx.destination);
+    osc2.start(t + 0.25);
+    osc2.stop(t + 0.5);
   } catch {
     // ignore
   }
@@ -104,9 +118,19 @@ function fireDesktopNotification(item: NotificationItem): void {
   const title = d.title ? `${prefix}: ${d.title}` : prefix;
   const body = d.actor_name ? `Assigned by ${d.actor_name}` : '';
   try {
-    new Notification(title, { body, tag: item.id });
+    const n = new Notification(title, {
+      body,
+      tag: `firmly-${item.id}-${Date.now()}`,
+      icon: '/favicon.ico',
+      requireInteraction: true,
+    });
+    if (d.url) {
+      n.onclick = () => { window.focus(); window.location.href = d.url!; n.close(); };
+    } else {
+      n.onclick = () => { window.focus(); n.close(); };
+    }
   } catch {
-    // ignore
+    // ignore — some browsers block Notification constructor in certain contexts
   }
 }
 
@@ -204,11 +228,18 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     lastSeenCountRef.current = unreadCount;
   }, [notifications, unreadCount, user]);
 
-  // Polling
+  // Polling + immediate check when tab regains focus (background tabs throttle timers)
   useEffect(() => {
     if (!token || !user) return;
     const id = setInterval(checkUnread, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkUnread();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [token, user, checkUnread]);
 
   const markRead = useCallback(async (id: string) => {
@@ -241,9 +272,20 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     try {
       const res = await Notification.requestPermission();
       setPermission(res);
+      if (res === 'granted') {
+        new Notification('Firmly', { body: 'Desktop notifications enabled!', icon: '/favicon.ico' });
+      }
     } catch {
       // ignore
     }
+  }, []);
+
+  // Sync permission state if user changes it via browser settings
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const sync = () => setPermission(Notification.permission);
+    window.addEventListener('focus', sync);
+    return () => window.removeEventListener('focus', sync);
   }, []);
 
   const refresh = useCallback(async () => {

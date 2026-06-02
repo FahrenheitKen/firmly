@@ -687,13 +687,9 @@ export default function CasesPage() {
     setError('');
     setShowSeriesModal(true);
     if (!token) return;
-    Promise.all([
-      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
-      api.get<{ users: User[] }>('/users?per_page=500', token),
-      api.get<{ business: Record<string, unknown> }>('/business', token),
-    ]).then(([cRes, uRes, bRes]) => {
-      setClients(cRes.clients);
-      setUsers(uRes.users);
+    api.get<{ clients: Client[] }>('/clients?per_page=500', token).then((r) => setClients(r.clients || [])).catch(() => {});
+    api.get<{ users: User[] }>('/users?per_page=500', token).then((r) => setUsers(r.users || [])).catch(() => {});
+    api.get<{ business: Record<string, unknown> }>('/business', token).then((bRes) => {
       const b = bRes.business;
       const refPrefixes = (b.ref_no_prefixes as Record<string, string>) || {};
       const fmt = refPrefixes.case_number_format || '{FI}/{CP}/{CT}/{N}/{Y}';
@@ -713,31 +709,23 @@ export default function CasesPage() {
     setSavingSeries(true);
     setError('');
     try {
-      // 1. Create the series with the our_reference as the base reference
-      const seriesRes = await api.post<{ series: { id: number } }>('/case-series', {
+      await api.post('/case-series', {
         reference: seriesForm.our_reference,
         name: seriesForm.title,
-        common_parties: seriesForm.common_parties || null,
-      }, token);
-      const seriesId = seriesRes.series.id;
-
-      // 2. Create the first case inside the series
-      await api.post(`/case-series/${seriesId}/cases`, {
-        title: seriesForm.title,
-        client_id: seriesForm.client_id || null,
-        assigned_to: seriesForm.assigned_to || null,
+        client_id: seriesForm.client_id ? Number(seriesForm.client_id) : null,
+        assigned_to: seriesForm.assigned_to ? Number(seriesForm.assigned_to) : null,
         client_reference: seriesForm.client_reference || null,
-        court: seriesForm.court || null,
-        court_number_filed: seriesForm.court_number_filed || null,
+        common_parties: seriesForm.common_parties || null,
+        station: seriesForm.court || null,
         judge: seriesForm.judge || null,
       }, token);
 
       setShowSeriesModal(false);
       fetchCases();
-      showToast('Series case created successfully', 'success');
+      showToast('Series created successfully', 'success');
     } catch (err: unknown) {
       const e = err as { errors?: Record<string, string[]>; message?: string };
-      setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to create series case');
+      setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to create series');
     } finally {
       setSavingSeries(false);
     }
@@ -957,12 +945,6 @@ export default function CasesPage() {
                           <button onClick={() => { setOpenDropdown(null); setEventCaseId(c.id); setEventForm({ event_type: 'Bring Up', event_date: '' }); setShowEventModal(true); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                             Add Event
-                          </button>
-                        )}
-                        {canCreate && (
-                          <button onClick={() => duplicateCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-primary/5 transition-colors">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                            Duplicate
                           </button>
                         )}
                         {canUpdate && !c.case_series_id && (
@@ -1580,43 +1562,41 @@ export default function CasesPage() {
         </form>
       </Modal>
 
-      <Modal open={showSeriesModal} onClose={() => setShowSeriesModal(false)} title="Add Series Case" size="md">
+      <Modal open={showSeriesModal} onClose={() => setShowSeriesModal(false)} title="New Series" size="lg">
         <form onSubmit={handleSeriesSubmit} className="space-y-4">
           {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
 
           <div>
             <label className="block text-sm font-medium mb-1">Subject *</label>
-            <input value={seriesForm.title} onChange={(e) => setSeriesForm({ ...seriesForm, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Series case subject" />
+            <input value={seriesForm.title} onChange={(e) => setSeriesForm({ ...seriesForm, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Series subject" />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Defendant (Common Party)</label>
-            <input value={seriesForm.common_parties} onChange={(e) => setSeriesForm({ ...seriesForm, common_parties: e.target.value.toUpperCase() })} className={inputClass} placeholder="Defendant (Common Party)" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <SearchableSelect
               label="Client"
               value={seriesForm.client_id}
-              onChange={(v) => {
-                setSeriesForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, false, user?.active_location?.city) }));
-              }}
-              options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
-              placeholder="Search client..."
+              onChange={(v) => setSeriesForm((prev) => ({ ...prev, client_id: v, our_reference: generateOurRef(businessName, businessId, v, caseFormat, caseCounter, false, user?.active_location?.city) }))}
+              options={clients.map((c) => ({
+                value: String(c.id),
+                label: c.client_type === 'individual'
+                  ? [c.first_name, c.last_name].filter(Boolean).join(' ')
+                  : (c.business_name || ''),
+              }))}
+              placeholder="Select client..."
             />
             <SearchableSelect
-              label="Assigned To"
+              label="Assigned to"
               value={seriesForm.assigned_to}
-              onChange={(v) => setSeriesForm((prev) => ({ ...prev, assigned_to: v }))}
-              options={[{ value: '', label: 'Select user' }, ...users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
-              placeholder="Search user..."
+              onChange={(v) => setSeriesForm({ ...seriesForm, assigned_to: v })}
+              options={users.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}` }))}
+              placeholder="Select user..."
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Client Reference</label>
-              <input value={seriesForm.client_reference} onChange={(e) => setSeriesForm({ ...seriesForm, client_reference: e.target.value.toUpperCase() })} className={inputClass} placeholder="Client's reference number" />
+              <input value={seriesForm.client_reference} onChange={(e) => setSeriesForm({ ...seriesForm, client_reference: e.target.value })} className={inputClass} placeholder="Client reference" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Our Reference</label>
@@ -1624,17 +1604,18 @@ export default function CasesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Defendant (Common Party)</label>
+            <input value={seriesForm.common_parties} onChange={(e) => setSeriesForm({ ...seriesForm, common_parties: e.target.value.toUpperCase() })} className={inputClass} placeholder="Defendant (Common Party)" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Station</label>
-              <input value={seriesForm.court} onChange={(e) => setSeriesForm({ ...seriesForm, court: e.target.value })} className={inputClass} placeholder="Station name" />
+              <input value={seriesForm.court} onChange={(e) => setSeriesForm({ ...seriesForm, court: e.target.value })} className={inputClass} placeholder="e.g. Nairobi" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Before Court No</label>
-              <input value={seriesForm.court_number_filed} onChange={(e) => setSeriesForm({ ...seriesForm, court_number_filed: e.target.value.toUpperCase() })} className={inputClass} placeholder="Before court no" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Magistrate/Judge</label>
+              <label className="block text-sm font-medium mb-1">Magistrate / Judge</label>
               <input value={seriesForm.judge} onChange={(e) => setSeriesForm({ ...seriesForm, judge: e.target.value })} className={inputClass} placeholder="Magistrate or Judge name" />
             </div>
           </div>
@@ -1642,7 +1623,7 @@ export default function CasesPage() {
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <button type="button" onClick={() => setShowSeriesModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
             <button type="submit" disabled={savingSeries} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
-              {savingSeries ? 'Creating...' : 'Create Series Case'}
+              {savingSeries ? 'Creating...' : 'Create Series'}
             </button>
           </div>
         </form>

@@ -35,7 +35,7 @@ class CaseSeriesController extends Controller
                 fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)]),
                 fn($q) => $q->withCount('activeCases')
             )
-            ->with(['parentSeries:id,reference,name', 'childSeries:id,parent_series_id,reference,name', 'createdByUser:id,first_name,last_name']);
+            ->with(['parentSeries:id,reference,name', 'childSeries:id,parent_series_id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name']);
 
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
@@ -65,10 +65,18 @@ class CaseSeriesController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $businessId = $user->business_id;
+
         $validated = $request->validate([
             'reference' => 'required|string|max:255',
             'name' => 'required|string|max:255',
+            'client_id' => "nullable|exists:clients,id,business_id,{$businessId}",
+            'assigned_to' => "nullable|exists:users,id,business_id,{$businessId}",
+            'client_reference' => 'nullable|string|max:255',
             'common_parties' => 'nullable|string|max:1000',
+            'station' => 'nullable|string|max:255',
+            'court_number_filed' => 'nullable|string|max:255',
+            'judge' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'parent_series_id' => 'nullable|exists:case_series,id',
         ]);
@@ -86,13 +94,19 @@ class CaseSeriesController extends Controller
             'parent_series_id' => $validated['parent_series_id'] ?? null,
             'reference' => $validated['reference'],
             'name' => $validated['name'],
+            'client_id' => $validated['client_id'] ?? null,
+            'assigned_to' => $validated['assigned_to'] ?? null,
+            'client_reference' => $validated['client_reference'] ?? null,
             'common_parties' => $validated['common_parties'] ?? null,
+            'station' => $validated['station'] ?? null,
+            'court_number_filed' => $validated['court_number_filed'] ?? null,
+            'judge' => $validated['judge'] ?? null,
             'notes' => $validated['notes'] ?? null,
             'created_by' => $user->id,
         ]);
 
         return response()->json([
-            'series' => $series->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name']),
+            'series' => $series->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name']),
         ], 201);
     }
 
@@ -119,6 +133,8 @@ class CaseSeriesController extends Controller
                 'parentSeries:id,reference,name',
                 'childSeries:id,parent_series_id,reference,name',
                 'createdByUser:id,first_name,last_name',
+                'client:id,first_name,last_name,business_name',
+                'assignedTo:id,first_name,last_name',
                 'activeCases' => $casesEagerLoad,
             ])
             ->findOrFail($id);
@@ -137,10 +153,18 @@ class CaseSeriesController extends Controller
             ->where('location_id', $user->active_location_id)
             ->findOrFail($id);
 
+        $businessId = $user->business_id;
+
         $validated = $request->validate([
             'reference' => 'sometimes|string|max:255',
             'name' => 'sometimes|string|max:255',
+            'client_id' => "nullable|exists:clients,id,business_id,{$businessId}",
+            'assigned_to' => "nullable|exists:users,id,business_id,{$businessId}",
+            'client_reference' => 'nullable|string|max:255',
             'common_parties' => 'nullable|string|max:1000',
+            'station' => 'nullable|string|max:255',
+            'court_number_filed' => 'nullable|string|max:255',
+            'judge' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'parent_series_id' => 'nullable|exists:case_series,id',
         ]);
@@ -151,7 +175,7 @@ class CaseSeriesController extends Controller
 
         $series->update($validated);
 
-        return response()->json(['series' => $series->fresh()->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name'])]);
+        return response()->json(['series' => $series->fresh()->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name'])]);
     }
 
     public function destroy(Request $request, int $id): JsonResponse
@@ -208,13 +232,13 @@ class CaseSeriesController extends Controller
         $basePart = implode('/', array_slice($refParts, 0, -1));
         $ourRef = $basePart . '-' . $suffix . '/' . $yearPart;
 
-        // Inherit shared fields from existing case in series if not provided
+        // Inherit shared fields from the series defaults, then fall back to first case
         $firstCase = $series->activeCases()->first();
-        $clientId = $validated['client_id'] ?? ($firstCase?->client_id);
-        $assignedTo = $validated['assigned_to'] ?? ($firstCase?->assigned_to);
-        $court = $validated['court'] ?? ($firstCase?->court);
-        $courtNumberFiled = $validated['court_number_filed'] ?? ($firstCase?->court_number_filed);
-        $judge = $validated['judge'] ?? ($firstCase?->judge);
+        $clientId = $validated['client_id'] ?? $series->client_id ?? $firstCase?->client_id;
+        $assignedTo = $validated['assigned_to'] ?? $series->assigned_to ?? $firstCase?->assigned_to;
+        $court = $validated['court'] ?? $series->station ?? $firstCase?->court;
+        $courtNumberFiled = $validated['court_number_filed'] ?? $series->court_number_filed ?? $firstCase?->court_number_filed;
+        $judge = $validated['judge'] ?? $series->judge ?? $firstCase?->judge;
 
         $case = Cases::create([
             'business_id' => $businessId,
