@@ -94,6 +94,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::post('/case-series/{id}/bulk-event', [CaseSeriesController::class, 'bulkAddEvent']);
     Route::post('/case-series/{id}/bulk-proceeding', [CaseSeriesController::class, 'bulkAddProceeding']);
     Route::post('/case-series/{id}/bulk-document', [CaseSeriesController::class, 'bulkUploadDocument']);
+    Route::post('/case-series/{id}/bulk-task', [CaseSeriesController::class, 'bulkAddTask']);
+    Route::get('/case-series/{id}/tasks', [CaseSeriesController::class, 'seriesTasks']);
+    Route::put('/case-series/{id}/bulk-task-status', [CaseSeriesController::class, 'bulkUpdateTaskStatus']);
 
     // Cases
     Route::apiResource('cases', CaseController::class);

@@ -17,8 +17,26 @@ interface CalendarEvent {
     id: number;
     case_number: string;
     title: string;
+    case_series_id?: number | null;
+    our_reference?: string | null;
+    series_suffix?: string | null;
     assigned_to?: { id: number; first_name: string; last_name: string | null } | null;
+    series?: { id: number; reference: string } | null;
   } | null;
+}
+
+interface DisplayEvent {
+  key: string;
+  event_type: string;
+  isGroup: boolean;
+  seriesId?: number;
+  seriesReference?: string;
+  caseCount: number;
+  events: CalendarEvent[];
+  // for single events
+  case_id?: number;
+  label: string;
+  subLabel: string;
 }
 
 const eventTypeColors: Record<string, string> = {
@@ -97,19 +115,73 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [token, gridStart]);
 
-  const eventsByDate = useMemo(() => {
-    const map: Record<string, CalendarEvent[]> = {};
+  const displayByDate = useMemo(() => {
+    // First, bucket raw events by date
+    const rawByDate: Record<string, CalendarEvent[]> = {};
     for (const e of events) {
       const key = eventDateKey(e.event_date);
-      if (!map[key]) map[key] = [];
-      map[key].push(e);
+      if (!rawByDate[key]) rawByDate[key] = [];
+      rawByDate[key].push(e);
+    }
+
+    // Then, group series events for each date
+    const map: Record<string, DisplayEvent[]> = {};
+    for (const [dateKey, dayEvents] of Object.entries(rawByDate)) {
+      const seriesGroups: Record<string, CalendarEvent[]> = {};
+      const standalone: CalendarEvent[] = [];
+
+      for (const e of dayEvents) {
+        const seriesId = e.case?.case_series_id;
+        if (seriesId) {
+          const gk = `${seriesId}-${e.event_type}`;
+          if (!seriesGroups[gk]) seriesGroups[gk] = [];
+          seriesGroups[gk].push(e);
+        } else {
+          standalone.push(e);
+        }
+      }
+
+      const display: DisplayEvent[] = [];
+
+      // Series groups: merge into one display entry
+      for (const [, groupEvents] of Object.entries(seriesGroups)) {
+        const first = groupEvents[0];
+        const ref = first.case?.series?.reference || first.case?.our_reference || '';
+        display.push({
+          key: `series-${first.case?.case_series_id}-${first.event_type}-${dateKey}`,
+          event_type: first.event_type,
+          isGroup: groupEvents.length > 1,
+          seriesId: first.case?.case_series_id || undefined,
+          seriesReference: ref,
+          caseCount: groupEvents.length,
+          events: groupEvents,
+          label: ref,
+          subLabel: `${groupEvents.length} cases`,
+        });
+      }
+
+      // Standalone events
+      for (const e of standalone) {
+        display.push({
+          key: `event-${e.id}`,
+          event_type: e.event_type,
+          isGroup: false,
+          caseCount: 1,
+          events: [e],
+          case_id: e.case_id,
+          label: e.case?.case_number || e.event_type,
+          subLabel: e.case?.title || '',
+        });
+      }
+
+      map[dateKey] = display;
     }
     return map;
   }, [events]);
 
   const todayKey = toDateKey(new Date());
   const monthLabel = monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-  const selectedEvents = selectedDate ? (eventsByDate[selectedDate] || []) : [];
+  const selectedDisplay = selectedDate ? (displayByDate[selectedDate] || []) : [];
   const monthHolidays = useMemo(
     () => getKenyaHolidaysInRange(toDateKey(monthStart), toDateKey(monthEnd)),
     [monthStart, monthEnd],
@@ -163,8 +235,8 @@ export default function DashboardPage() {
               const key = toDateKey(day);
               const inMonth = day.getMonth() === monthStart.getMonth();
               const isToday = key === todayKey;
-              const dayEvents = eventsByDate[key] || [];
-              const hasEvents = dayEvents.length > 0;
+              const dayDisplay = displayByDate[key] || [];
+              const hasEvents = dayDisplay.length > 0;
               const holidayName = getKenyaHoliday(key);
               return (
                 <button
@@ -192,34 +264,34 @@ export default function DashboardPage() {
                   )}
                   <div className="flex flex-col gap-0.5 overflow-hidden">
                     <div className="hidden sm:flex flex-col gap-0.5">
-                      {dayEvents.slice(0, 3).map((e) => (
+                      {dayDisplay.slice(0, 3).map((d) => (
                         <span
-                          key={e.id}
+                          key={d.key}
                           className={`text-[10px] leading-tight px-1.5 py-0.5 rounded border truncate ${
-                            eventTypeColors[e.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'
+                            eventTypeColors[d.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'
                           }`}
-                          title={`${e.event_type} — ${e.case?.case_number || ''}`}
+                          title={d.isGroup ? `${d.event_type} — ${d.seriesReference} (${d.caseCount} cases)` : `${d.event_type} — ${d.label}`}
                         >
-                          {e.case?.case_number || e.event_type}
+                          {d.isGroup ? `${d.label} (${d.caseCount})` : d.label}
                         </span>
                       ))}
-                      {dayEvents.length > 3 && (
-                        <span className="text-[10px] text-muted px-1">+{dayEvents.length - 3} more</span>
+                      {dayDisplay.length > 3 && (
+                        <span className="text-[10px] text-muted px-1">+{dayDisplay.length - 3} more</span>
                       )}
                     </div>
                     {hasEvents && (
                       <div className="flex gap-0.5 sm:hidden flex-wrap">
-                        {dayEvents.slice(0, 3).map((e) => (
+                        {dayDisplay.slice(0, 3).map((d) => (
                           <span
-                            key={e.id}
+                            key={d.key}
                             className={`w-1.5 h-1.5 rounded-full ${
-                              legendDotColors[e.event_type] || 'bg-gray-400'
+                              legendDotColors[d.event_type] || 'bg-gray-400'
                             }`}
-                            title={`${e.event_type} — ${e.case?.case_number || ''}`}
+                            title={d.isGroup ? `${d.event_type} — ${d.seriesReference}` : `${d.event_type} — ${d.label}`}
                           />
                         ))}
-                        {dayEvents.length > 3 && (
-                          <span className="text-[8px] text-muted">+{dayEvents.length - 3}</span>
+                        {dayDisplay.length > 3 && (
+                          <span className="text-[8px] text-muted">+{dayDisplay.length - 3}</span>
                         )}
                       </div>
                     )}
@@ -270,35 +342,53 @@ export default function DashboardPage() {
       </div>
 
       <Modal
-        open={!!selectedDate && selectedEvents.length > 0}
+        open={!!selectedDate && selectedDisplay.length > 0}
         onClose={() => setSelectedDate(null)}
         title={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : ''}
         size="lg"
       >
         <ul className="divide-y divide-border">
-          {selectedEvents.map((e) => (
-            <li key={e.id}>
-              <Link
-                href={`/dashboard/cases/${e.case_id}`}
-                onClick={() => setSelectedDate(null)}
-                className="flex items-center gap-3 py-3 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors"
-              >
-                <span className={`text-xs px-2 py-0.5 rounded border ${eventTypeColors[e.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
-                  {e.event_type}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{e.case?.case_number || 'Case'}</p>
-                  <p className="text-xs text-muted truncate">{e.case?.title || ''}</p>
-                  {canSeeAllCases && (
-                    <p className="text-xs text-muted truncate mt-0.5">
-                      Assigned to: {e.case?.assigned_to
-                        ? `${e.case.assigned_to.first_name} ${e.case.assigned_to.last_name || ''}`.trim()
-                        : 'Unassigned'}
-                    </p>
-                  )}
-                </div>
-                <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-              </Link>
+          {selectedDisplay.map((d) => (
+            <li key={d.key}>
+              {d.isGroup && d.seriesId ? (
+                <Link
+                  href={`/dashboard/series/${d.seriesId}`}
+                  onClick={() => setSelectedDate(null)}
+                  className="flex items-center gap-3 py-3 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors"
+                >
+                  <span className={`text-xs px-2 py-0.5 rounded border ${eventTypeColors[d.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                    {d.event_type}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{d.seriesReference}</p>
+                    <p className="text-xs text-muted truncate">{d.caseCount} cases in series</p>
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium shrink-0">{d.caseCount}</span>
+                  <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </Link>
+              ) : (
+                <Link
+                  href={`/dashboard/cases/${d.events[0].case_id}`}
+                  onClick={() => setSelectedDate(null)}
+                  className="flex items-center gap-3 py-3 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors"
+                >
+                  <span className={`text-xs px-2 py-0.5 rounded border ${eventTypeColors[d.event_type] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                    {d.event_type}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{d.events[0].case?.our_reference || d.events[0].case?.case_number || 'Case'}</p>
+                    <p className="text-xs text-muted truncate">{d.events[0].case?.title || ''}</p>
+                    {canSeeAllCases && (
+                      <p className="text-xs text-muted truncate mt-0.5">
+                        Assigned to: {d.events[0].case?.assigned_to
+                          ? `${d.events[0].case.assigned_to.first_name} ${d.events[0].case.assigned_to.last_name || ''}`.trim()
+                          : 'Unassigned'}
+                      </p>
+                    )}
+                  </div>
+                  <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </Link>
+              )}
             </li>
           ))}
         </ul>

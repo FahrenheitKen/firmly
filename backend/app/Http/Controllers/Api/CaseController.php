@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Models\Cases;
 use App\Models\CaseDocument;
+use App\Models\CaseSeries;
 use App\Models\Client;
 use App\Models\User;
 use App\Jobs\ConvertCaseDocumentToPdf;
@@ -259,8 +260,22 @@ class CaseController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $seriesId = $request->input('series_id') ?: $original->case_series_id;
+        $suffix = null;
         $ref = $original->our_reference;
-        if ($ref) {
+
+        if ($seriesId) {
+            $series = CaseSeries::where('business_id', $user->business_id)->find($seriesId);
+            if ($series) {
+                $suffix = $series->nextSuffix();
+                $refParts = explode('/', $series->reference);
+                $yearPart = end($refParts);
+                $basePart = implode('/', array_slice($refParts, 0, -1));
+                $ref = $basePart . '-' . $suffix . '/' . $yearPart;
+            }
+        }
+
+        if (!$suffix && $ref) {
             $ref = preg_match('/-D\d*$/', $ref) ? preg_replace_callback('/-D(\d*)$/', fn($m) => '-D' . (((int) ($m[1] ?: 1)) + 1), $ref) : $ref . '-D';
         }
 
@@ -268,7 +283,23 @@ class CaseController extends Controller
         $newCase->our_reference = $ref;
         $newCase->status = 'Open';
         $newCase->created_by = $user->id;
+        if ($suffix) {
+            $newCase->case_series_id = $series->id;
+            $newCase->series_suffix = $suffix;
+        }
+
+        if ($request->filled('description')) {
+            $newCase->description = $request->input('description');
+        }
+        if ($request->filled('opposing_counsel_id')) {
+            $newCase->opposing_counsel_id = $request->input('opposing_counsel_id');
+        }
+
         $newCase->save();
+
+        if ($suffix) {
+            $series->update(['last_suffix' => $suffix]);
+        }
 
         $storage = app(TenantDocumentStorage::class);
         $business = Business::findOrFail($user->business_id);

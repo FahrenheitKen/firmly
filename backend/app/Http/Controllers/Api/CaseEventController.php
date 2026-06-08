@@ -27,8 +27,9 @@ class CaseEventController extends Controller
             ->whereNull('cases.deleted_at')
             ->when($user->restrictedToOwnCases(), fn($q) => $q->where('cases.assigned_to', $user->id))
             ->with([
-                'case:id,case_number,title,assigned_to',
+                'case:id,case_number,title,assigned_to,case_series_id,our_reference,series_suffix',
                 'case.assignedTo:id,first_name,last_name',
+                'case.series:id,reference',
             ]);
 
         if ($request->filled('from')) {

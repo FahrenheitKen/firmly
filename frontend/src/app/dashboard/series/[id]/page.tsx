@@ -39,6 +39,18 @@ interface SeriesDetail {
 interface ClientLite { id: number; first_name: string | null; last_name: string | null; business_name: string | null }
 interface UserLite { id: number; first_name: string; last_name: string }
 interface OcLite { id: number; name: string }
+interface SeriesTask {
+  id: number;
+  title: string;
+  description: string | null;
+  priority: string;
+  status: string;
+  due_date: string | null;
+  assigned_to: number | null;
+  assignee?: { id: number; first_name: string; last_name: string } | null;
+  created_by_user?: { id: number; first_name: string; last_name: string } | null;
+  case?: { id: number; case_number: string | null; title: string; series_suffix: string | null } | null;
+}
 
 const statusColors: Record<string, string> = {
   Open: 'bg-blue-50 text-blue-700',
@@ -93,6 +105,24 @@ export default function SeriesDetailPage() {
 
   const [openCaseDropdown, setOpenCaseDropdown] = useState<number | null>(null);
 
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicatingCaseId, setDuplicatingCaseId] = useState<number | null>(null);
+  const [duplicateForm, setDuplicateForm] = useState({ description: '', opposing_counsel_id: '' });
+  const [duplicating, setDuplicating] = useState(false);
+  const [showDupAddOC, setShowDupAddOC] = useState(false);
+  const [dupNewOC, setDupNewOC] = useState({ name: '', firm: '', phone: '', email: '' });
+  const [savingDupOC, setSavingDupOC] = useState(false);
+
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskForm, setTaskForm] = useState({ title: '', description: '', priority: 'Medium', assigned_to: '', due_date: '', exclude_case_ids: [] as number[] });
+  const [savingTask, setSavingTask] = useState(false);
+
+  const [seriesTasks, setSeriesTasks] = useState<SeriesTask[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
+  const [bulkStatus, setBulkStatus] = useState('');
+  const [updatingTasks, setUpdatingTasks] = useState(false);
+
   useEffect(() => {
     if (openCaseDropdown === null) return;
     const handler = (e: MouseEvent) => {
@@ -103,16 +133,117 @@ export default function SeriesDetailPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, [openCaseDropdown]);
 
-  const duplicateCase = async (caseId: number) => {
+  const openDuplicateModal = (caseId: number) => {
     setOpenCaseDropdown(null);
-    if (!token) return;
+    setDuplicatingCaseId(caseId);
+    setDuplicateForm({ description: '', opposing_counsel_id: '' });
+    setShowDupAddOC(false);
+    setDupNewOC({ name: '', firm: '', phone: '', email: '' });
+    setError('');
+    setShowDuplicateModal(true);
+    loadFormData();
+  };
+
+  const handleDuplicate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !duplicatingCaseId) return;
+    setDuplicating(true);
+    setError('');
     try {
-      await api.post(`/cases/${caseId}/duplicate`, { series_id: Number(id) }, token);
+      const payload: Record<string, unknown> = { series_id: Number(id) };
+      if (duplicateForm.description.trim()) payload.description = duplicateForm.description;
+      if (duplicateForm.opposing_counsel_id) payload.opposing_counsel_id = Number(duplicateForm.opposing_counsel_id);
+      await api.post(`/cases/${duplicatingCaseId}/duplicate`, payload, token);
       toast('Case duplicated', 'success');
+      setShowDuplicateModal(false);
       fetchSeries();
     } catch (err: unknown) {
-      toast((err as { message?: string }).message || 'Failed to duplicate case', 'error');
+      const e = err as { errors?: Record<string, string[]>; message?: string };
+      setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to duplicate case');
+    } finally { setDuplicating(false); }
+  };
+
+  const saveDupOpposingCounsel = async () => {
+    if (!token || (!dupNewOC.name.trim() && !dupNewOC.firm.trim())) return;
+    setSavingDupOC(true);
+    try {
+      const res = await api.post<{ opposing_counsel: OcLite }>('/opposing-counsels', dupNewOC, token);
+      const created = res.opposing_counsel;
+      setCounsels((prev) => [...prev, created]);
+      setDuplicateForm((prev) => ({ ...prev, opposing_counsel_id: String(created.id) }));
+      setShowDupAddOC(false);
+      setDupNewOC({ name: '', firm: '', phone: '', email: '' });
+    } catch (err: unknown) {
+      setError((err as { message?: string }).message || 'Failed to save opposing counsel');
+    } finally { setSavingDupOC(false); }
+  };
+
+  const fetchSeriesTasks = useCallback(async () => {
+    if (!token) return;
+    setLoadingTasks(true);
+    try {
+      const res = await api.get<{ tasks: SeriesTask[] }>(`/case-series/${id}/tasks`, token);
+      setSeriesTasks(res.tasks);
+    } catch { /* ignore */ }
+    finally { setLoadingTasks(false); }
+  }, [token, id]);
+
+  const openBulkTask = () => {
+    setTaskForm({ title: '', description: '', priority: 'Medium', assigned_to: '', due_date: '', exclude_case_ids: [] });
+    setError('');
+    setShowTaskModal(true);
+    loadFormData();
+  };
+
+  const handleBulkTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    setSavingTask(true);
+    setError('');
+    try {
+      const payload: Record<string, unknown> = {
+        title: taskForm.title,
+        description: taskForm.description || null,
+        priority: taskForm.priority,
+        assigned_to: taskForm.assigned_to ? Number(taskForm.assigned_to) : null,
+        due_date: taskForm.due_date || null,
+        exclude_case_ids: taskForm.exclude_case_ids,
+      };
+      const res = await api.post<{ message: string }>(`/case-series/${id}/bulk-task`, payload, token);
+      toast(res.message, 'success');
+      setShowTaskModal(false);
+      fetchSeriesTasks();
+    } catch (err: unknown) {
+      const e = err as { errors?: Record<string, string[]>; message?: string };
+      setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed');
+    } finally { setSavingTask(false); }
+  };
+
+  const toggleTaskSelect = (taskId: number) => {
+    setSelectedTaskIds(prev => prev.includes(taskId) ? prev.filter(x => x !== taskId) : [...prev, taskId]);
+  };
+
+  const toggleAllTasks = () => {
+    const activeTasks = seriesTasks.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
+    if (selectedTaskIds.length === activeTasks.length) {
+      setSelectedTaskIds([]);
+    } else {
+      setSelectedTaskIds(activeTasks.map(t => t.id));
     }
+  };
+
+  const handleBulkUpdateStatus = async () => {
+    if (!token || !bulkStatus || selectedTaskIds.length === 0) return;
+    setUpdatingTasks(true);
+    try {
+      const res = await api.put<{ message: string }>(`/case-series/${id}/bulk-task-status`, { status: bulkStatus, task_ids: selectedTaskIds }, token);
+      toast(res.message, 'success');
+      setSelectedTaskIds([]);
+      setBulkStatus('');
+      fetchSeriesTasks();
+    } catch (err: unknown) {
+      toast((err as { message?: string }).message || 'Failed to update tasks', 'error');
+    } finally { setUpdatingTasks(false); }
   };
 
   const fetchSeries = useCallback(async () => {
@@ -125,7 +256,7 @@ export default function SeriesDetailPage() {
     finally { setLoading(false); }
   }, [token, id]); // eslint-disable-line
 
-  useEffect(() => { fetchSeries(); }, [fetchSeries]);
+  useEffect(() => { fetchSeries(); fetchSeriesTasks(); }, [fetchSeries, fetchSeriesTasks]);
 
   const loadFormData = async () => {
     if (!token) return;
@@ -317,6 +448,10 @@ export default function SeriesDetailPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                 Bulk Upload
               </button>
+              <button onClick={openBulkTask} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-violet-50 border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-100 text-sm font-medium">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                Bulk Task
+              </button>
             </>
           )}
         </div>
@@ -347,7 +482,7 @@ export default function SeriesDetailPage() {
           <thead>
             <tr className="border-b border-border bg-gray-50">
               <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider text-left">Actions</th>
-              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-16">Suffix</th>
+              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-16">Series</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Our Reference</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Case Number</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Client</th>
@@ -392,7 +527,7 @@ export default function SeriesDetailPage() {
                         Add Event
                       </button>
                       <hr className="my-1 border-border" />
-                      <button onClick={() => duplicateCase(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-gray-50 transition-colors">
+                      <button onClick={() => openDuplicateModal(c.id)} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-gray-50 transition-colors">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
                         Duplicate
                       </button>
@@ -416,6 +551,88 @@ export default function SeriesDetailPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Series Tasks */}
+      {(() => {
+        const activeTasks = seriesTasks.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
+        return activeTasks.length > 0 && (
+        <div className="mt-6 bg-card-bg rounded-xl border border-border overflow-visible">
+          <div className="px-4 py-3 border-b border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <p className="text-sm font-medium">{activeTasks.length} Active Task{activeTasks.length !== 1 ? 's' : ''} Across Series</p>
+            {selectedTaskIds.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted">{selectedTaskIds.length} selected</span>
+                <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)} className="px-2.5 py-1.5 text-xs border border-border rounded-lg bg-card-bg focus:outline-none focus:border-primary">
+                  <option value="">Change status to...</option>
+                  <option value="Pending">Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+                <button onClick={handleBulkUpdateStatus} disabled={!bulkStatus || updatingTasks} className="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                  {updatingTasks ? 'Updating...' : 'Apply'}
+                </button>
+              </div>
+            )}
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-gray-50">
+                <th className="w-10 px-3 py-3">
+                  <input type="checkbox" checked={selectedTaskIds.length > 0 && selectedTaskIds.length === activeTasks.length} onChange={toggleAllTasks} className="w-4 h-4 rounded text-primary" />
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Task</th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-16">Case</th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Assignee</th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Due Date</th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Priority</th>
+                <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-28">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeTasks.map(t => {
+                const taskStatusColors: Record<string, string> = {
+                  Pending: 'bg-gray-100 text-gray-700',
+                  'In Progress': 'bg-yellow-50 text-yellow-700',
+                  Completed: 'bg-green-50 text-green-700',
+                  Cancelled: 'bg-red-50 text-red-600',
+                };
+                const priorityColors: Record<string, string> = {
+                  Low: 'text-gray-500',
+                  Medium: 'text-blue-600',
+                  High: 'text-orange-600',
+                  Urgent: 'text-red-600 font-semibold',
+                };
+                return (
+                  <tr key={t.id} className="border-b border-border last:border-0 hover:bg-gray-50">
+                    <td className="px-3 py-3">
+                      <input type="checkbox" checked={selectedTaskIds.includes(t.id)} onChange={() => toggleTaskSelect(t.id)} className="w-4 h-4 rounded text-primary" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-sm">{t.title}</p>
+                      {t.description && <p className="text-xs text-muted truncate max-w-xs mt-0.5">{t.description}</p>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold">{t.case?.series_suffix || '-'}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell text-muted">
+                      {t.assignee ? `${t.assignee.first_name} ${t.assignee.last_name || ''}`.trim() : <span className="text-muted/50">Unassigned</span>}
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell text-xs text-muted">{t.due_date ? formatDate(t.due_date) : '-'}</td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <span className={`text-xs ${priorityColors[t.priority] || ''}`}>{t.priority}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${taskStatusColors[t.status] || 'bg-gray-100 text-gray-700'}`}>{t.status}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        );
+      })()}
 
       {/* Create Case Modal */}
       <Modal open={showCaseModal} onClose={() => setShowCaseModal(false)} title="Add Case to Series" size="xl">
@@ -588,6 +805,130 @@ export default function SeriesDetailPage() {
             <button type="button" onClick={() => setShowProceedingModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted">Cancel</button>
             <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
               {saving ? 'Adding...' : `Add to ${series.active_cases.length - proceedingForm.exclude_case_ids.length} Case(s)`}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Duplicate Case Modal */}
+      <Modal open={showDuplicateModal} onClose={() => setShowDuplicateModal(false)} title="Duplicate Case" size="lg">
+        <form onSubmit={handleDuplicate} className="space-y-4">
+          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
+          <div className="flex items-start gap-2.5 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl text-sm text-primary">
+            <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            A new case will be created with all documents copied. You can optionally set parties and opposing counsel for the duplicate.
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Parties</label>
+            <textarea value={duplicateForm.description} onChange={(e) => setDuplicateForm({ ...duplicateForm, description: e.target.value })} rows={3} className={inputClass} placeholder="List the parties involved (leave blank to copy from original)" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium">Opposing Counsel</label>
+              {!showDupAddOC && (
+                <button type="button" onClick={() => setShowDupAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+              )}
+            </div>
+            <SearchableSelect
+              value={duplicateForm.opposing_counsel_id}
+              onChange={(v) => setDuplicateForm({ ...duplicateForm, opposing_counsel_id: v })}
+              options={[{ value: '', label: 'Keep from original' }, ...counsels.map(o => ({ value: String(o.id), label: o.name }))]}
+              placeholder="Search counsel..."
+            />
+          </div>
+          {showDupAddOC && (
+            <div className="p-4 bg-gray-50 border border-border rounded-xl space-y-3">
+              <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-muted mb-1">Name</label>
+                  <input value={dupNewOC.name} onChange={(e) => setDupNewOC({ ...dupNewOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">Firm</label>
+                  <input value={dupNewOC.firm} onChange={(e) => setDupNewOC({ ...dupNewOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">Phone</label>
+                  <input value={dupNewOC.phone} onChange={(e) => setDupNewOC({ ...dupNewOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">Email</label>
+                  <input type="email" value={dupNewOC.email} onChange={(e) => setDupNewOC({ ...dupNewOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setShowDupAddOC(false); setDupNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
+                <button type="button" disabled={savingDupOC || (!dupNewOC.name.trim() && !dupNewOC.firm.trim())} onClick={saveDupOpposingCounsel} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                  {savingDupOC ? 'Saving...' : 'Save & Select'}
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <button type="button" onClick={() => setShowDuplicateModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted">Cancel</button>
+            <button type="submit" disabled={duplicating} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+              {duplicating ? 'Duplicating...' : 'Duplicate Case'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Bulk Task Modal */}
+      <Modal open={showTaskModal} onClose={() => setShowTaskModal(false)} title="Assign Task to Series" size="lg">
+        <form onSubmit={handleBulkTask} className="space-y-4">
+          {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
+          <div>
+            <label className="block text-sm font-medium mb-1">Task Title *</label>
+            <input value={taskForm.title} onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })} className={inputClass} placeholder="e.g. File response documents" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Description</label>
+            <textarea value={taskForm.description} onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} rows={2} className={inputClass} placeholder="Task details..." />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Assign To</label>
+              <SearchableSelect
+                value={taskForm.assigned_to}
+                onChange={(v) => setTaskForm({ ...taskForm, assigned_to: v })}
+                options={[{ value: '', label: 'Unassigned' }, ...users.map(u => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}` }))]}
+                placeholder="Search user..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Priority</label>
+              <select value={taskForm.priority} onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })} className={inputClass}>
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Due Date</label>
+              <DatePicker value={taskForm.due_date} onChange={(v) => setTaskForm({ ...taskForm, due_date: v })} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Include Cases</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+              {series.active_cases.map(c => {
+                const excluded = taskForm.exclude_case_ids.includes(c.id);
+                return (
+                  <label key={c.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${excluded ? 'border-border/60 bg-background/50 text-muted' : 'border-primary/30 bg-primary/5'}`}>
+                    <input type="checkbox" checked={!excluded} onChange={() => setTaskForm(prev => ({ ...prev, exclude_case_ids: prev.exclude_case_ids.includes(c.id) ? prev.exclude_case_ids.filter(x => x !== c.id) : [...prev.exclude_case_ids, c.id] }))} className="w-4 h-4 rounded text-primary" />
+                    <span className="font-mono text-xs">{c.series_suffix || '?'}</span>
+                    <span className="truncate">{c.our_reference || c.title}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <button type="button" onClick={() => setShowTaskModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted">Cancel</button>
+            <button type="submit" disabled={savingTask} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+              {savingTask ? 'Assigning...' : `Assign to ${series.active_cases.length - taskForm.exclude_case_ids.length} Case(s)`}
             </button>
           </div>
         </form>

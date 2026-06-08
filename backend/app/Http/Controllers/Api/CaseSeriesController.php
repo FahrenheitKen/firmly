@@ -9,8 +9,10 @@ use App\Models\CaseEvent;
 use App\Models\Cases;
 use App\Models\CaseSeries;
 use App\Models\CourtProceeding;
+use App\Models\Task;
 use App\Models\User;
 use App\Notifications\CaseAssignedNotification;
+use App\Notifications\TaskAssignedNotification;
 use App\Rules\NotKenyaHoliday;
 use App\Services\TenantDocumentStorage;
 use Illuminate\Http\JsonResponse;
@@ -470,6 +472,149 @@ class CaseSeriesController extends Controller
         return response()->json([
             'message' => "Uploaded to {$cases->count()} case(s). {$uploaded} total document(s) created.",
             'uploaded' => $uploaded,
+        ]);
+    }
+
+    public function bulkAddTask(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isOwner() && !$user->hasPermissionSafe('task.create')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $series = CaseSeries::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        $businessId = $user->business_id;
+
+        $validated = $request->validate([
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'priority' => 'nullable|in:Low,Medium,High,Urgent',
+            'assigned_to' => "nullable|integer|exists:users,id,business_id,{$businessId}",
+            'due_date' => 'nullable|date',
+            'exclude_case_ids' => 'nullable|array',
+            'exclude_case_ids.*' => 'integer',
+        ]);
+
+        $excludeIds = $validated['exclude_case_ids'] ?? [];
+        $cases = $series->activeCases()->whereNotIn('id', $excludeIds)->get();
+
+        if ($cases->isEmpty()) {
+            return response()->json(['message' => 'No cases to assign tasks to.'], 422);
+        }
+
+        $created = 0;
+        $assignee = null;
+        if (!empty($validated['assigned_to'])) {
+            $assignee = User::where('id', $validated['assigned_to'])
+                ->where('business_id', $businessId)
+                ->first();
+        }
+
+        foreach ($cases as $case) {
+            $task = Task::create([
+                'title' => $validated['title'],
+                'description' => $validated['description'] ?? null,
+                'priority' => $validated['priority'] ?? 'Medium',
+                'status' => 'Pending',
+                'assigned_to' => $validated['assigned_to'] ?? null,
+                'case_id' => $case->id,
+                'due_date' => $validated['due_date'] ?? null,
+                'business_id' => $businessId,
+                'location_id' => $user->active_location_id,
+                'created_by' => $user->id,
+            ]);
+
+            if ($assignee && $assignee->id !== $user->id) {
+                $assignee->notify(new TaskAssignedNotification($task, $user));
+            }
+
+            $created++;
+        }
+
+        return response()->json([
+            'message' => "Task assigned to {$created} case(s).",
+            'created' => $created,
+        ]);
+    }
+
+    public function seriesTasks(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isOwner()
+            && !$user->hasPermissionSafe('task.view_all')
+            && !$user->hasPermissionSafe('task.view_own')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $series = CaseSeries::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        $caseIds = $series->activeCases()->pluck('id');
+
+        $query = Task::with(['assignee:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'case:id,case_number,title,series_suffix'])
+            ->where('business_id', $user->business_id)
+            ->whereIn('case_id', $caseIds);
+
+        if (!$user->isOwner() && !$user->hasPermissionSafe('task.view_all')) {
+            $query->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)->orWhere('created_by', $user->id);
+            });
+        }
+
+        $tasks = $query->orderByRaw("CASE status WHEN 'In Progress' THEN 1 WHEN 'Pending' THEN 2 WHEN 'Completed' THEN 3 WHEN 'Cancelled' THEN 4 END")
+            ->orderBy('due_date')
+            ->get();
+
+        return response()->json(['tasks' => $tasks]);
+    }
+
+    public function bulkUpdateTaskStatus(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isOwner() && !$user->hasPermissionSafe('task.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $series = CaseSeries::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        $validated = $request->validate([
+            'status' => 'required|in:Pending,In Progress,Completed,Cancelled',
+            'task_ids' => 'required|array|min:1',
+            'task_ids.*' => 'integer',
+        ]);
+
+        $caseIds = $series->activeCases()->pluck('id');
+
+        $tasks = Task::where('business_id', $user->business_id)
+            ->whereIn('case_id', $caseIds)
+            ->whereIn('id', $validated['task_ids'])
+            ->get();
+
+        $updated = 0;
+        foreach ($tasks as $task) {
+            $data = ['status' => $validated['status']];
+
+            if ($validated['status'] === 'Completed' && $task->status !== 'Completed') {
+                $data['completed_at'] = now();
+                $data['completed_by'] = $user->id;
+            } elseif ($validated['status'] !== 'Completed' && $task->status === 'Completed') {
+                $data['completed_at'] = null;
+                $data['completed_by'] = null;
+            }
+
+            $task->update($data);
+            $updated++;
+        }
+
+        return response()->json([
+            'message' => "Updated {$updated} task(s) to {$validated['status']}.",
+            'updated' => $updated,
         ]);
     }
 }
