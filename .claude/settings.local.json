@@ -236,13 +236,9 @@
       "Bash(tasklist)",
       "mcp__claude-flow__system_status",
       "Bash(echo \"services: $\\(systemctl is-active firmly-frontend firmly-queue php8.2-fpm)",
-      "Bash(disown)",
-      "Bash(taskkill:*)",
-      "Bash(cmd:*)",
-      "Bash(rm:*)",
-      "Bash(composer remove:*)",
-      "Bash(C:/laragon/bin/mysql/mysql-8.0.30-winx64/bin/mysqld.exe:*)",
-      "Bash(C:/laragon/bin/mysql/mysql-8.0.30-winx64/bin/mysql.exe -u root -e \"SELECT 1 AS connected;\")"
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(awk '/function activityLog/,/^    }/' app/Http/Controllers/ReportController.php)"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -79,6 +79,7 @@ export default function CasesPage() {
   const canDelete = can('case.delete');
   const canReassign = can('case.reassign');
   const canViewAll = can('case.view_all') || can('case.view');
+  const canViewOwn = can('case.view_own');
   const router = useRouter();
   const { toast: showToast } = useToast();
   const [cases, setCases] = useState<CaseItem[]>([]);
@@ -105,6 +106,7 @@ export default function CasesPage() {
   const [filterAssigned, setFilterAssigned] = useState('');
   const [filterClients, setFilterClients] = useState<Client[]>([]);
   const [filterUsers, setFilterUsers] = useState<User[]>([]);
+  const [sortDir, setSortDir] = useState<'' | 'asc' | 'desc'>('');
   const [openSeriesDropdown, setOpenSeriesDropdown] = useState<number | null>(null);
   const [expandedSeries, setExpandedSeries] = useState<Set<number>>(new Set());
 
@@ -172,15 +174,16 @@ export default function CasesPage() {
   }, [openDropdown, openSeriesDropdown]);
 
   useEffect(() => {
-    if (!token || !canViewAll) return;
-    Promise.all([
-      api.get<{ clients: Client[] }>('/clients?per_page=500', token),
-      api.get<{ users: User[] }>('/users?per_page=500', token),
-    ]).then(([cRes, uRes]) => {
-      setFilterClients(cRes.clients);
-      setFilterUsers(uRes.users);
-    }).catch(() => {});
-  }, [token, canViewAll]); // eslint-disable-line
+    if (!token || (!canViewAll && !canViewOwn)) return;
+    api.get<{ clients: Client[] }>('/clients?per_page=500', token)
+      .then((cRes) => setFilterClients(cRes.clients))
+      .catch(() => {});
+    if (canViewAll) {
+      api.get<{ users: User[] }>('/users?per_page=500', token)
+        .then((uRes) => setFilterUsers(uRes.users))
+        .catch(() => {});
+    }
+  }, [token, canViewAll, canViewOwn]); // eslint-disable-line
 
   const fetchCases = useCallback(async () => {
     if (!token) return;
@@ -189,6 +192,7 @@ export default function CasesPage() {
     if (search) params.set('search', search);
     if (filterClient) params.set('client_id', filterClient);
     if (filterAssigned) params.set('assigned_to', filterAssigned);
+    if (sortDir) { params.set('sort_by', 'our_reference'); params.set('sort_dir', sortDir); }
     params.set('page', String(page));
     params.set('per_page', String(perPage));
     const qs = params.toString();
@@ -196,7 +200,7 @@ export default function CasesPage() {
     setCases(res.cases);
     if (res.pagination) setPagination(res.pagination);
     setLoading(false);
-  }, [token, search, filterClient, filterAssigned, page, perPage, user?.active_location?.id]); // eslint-disable-line
+  }, [token, search, filterClient, filterAssigned, sortDir, page, perPage, user?.active_location?.id]); // eslint-disable-line
 
   useEffect(() => {
     const timer = setTimeout(fetchCases, 300);
@@ -765,24 +769,24 @@ export default function CasesPage() {
           />
         </div>
         {canViewAll && (
-          <>
-            <div className="min-w-[180px]">
-              <SearchableSelect
-                value={filterAssigned}
-                onChange={(v) => { setFilterAssigned(v); setPage(1); }}
-                options={[{ value: '', label: 'All Assigned To' }, ...filterUsers.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
-                placeholder="Search user..."
-              />
-            </div>
-            <div className="min-w-[180px]">
-              <SearchableSelect
-                value={filterClient}
-                onChange={(v) => { setFilterClient(v); setPage(1); }}
-                options={[{ value: '', label: 'All Clients' }, ...filterClients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
-                placeholder="Search client..."
-              />
-            </div>
-          </>
+          <div className="min-w-[180px]">
+            <SearchableSelect
+              value={filterAssigned}
+              onChange={(v) => { setFilterAssigned(v); setPage(1); }}
+              options={[{ value: '', label: 'All Assigned To' }, ...filterUsers.map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))]}
+              placeholder="Search user..."
+            />
+          </div>
+        )}
+        {(canViewAll || canViewOwn) && (
+          <div className="min-w-[180px]">
+            <SearchableSelect
+              value={filterClient}
+              onChange={(v) => { setFilterClient(v); setPage(1); }}
+              options={[{ value: '', label: 'All Clients' }, ...filterClients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
+              placeholder="Search client..."
+            />
+          </div>
         )}
       </div>
 
@@ -798,7 +802,20 @@ export default function CasesPage() {
             <thead>
               <tr className="border-b border-border bg-gray-50">
                 <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Action</th>
-                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Ref</th>
+                <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">
+                  <button
+                    type="button"
+                    onClick={() => { setSortDir((d) => (d === '' ? 'asc' : d === 'asc' ? 'desc' : '')); setPage(1); }}
+                    className="inline-flex items-center gap-1 font-medium uppercase tracking-wider hover:text-foreground transition-colors"
+                    title="Sort by reference"
+                  >
+                    Ref
+                    <span className="flex flex-col -space-y-1.5">
+                      <svg className={`w-3 h-3 ${sortDir === 'asc' ? 'text-primary' : 'text-muted/40'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" /></svg>
+                      <svg className={`w-3 h-3 ${sortDir === 'desc' ? 'text-primary' : 'text-muted/40'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
+                    </span>
+                  </button>
+                </th>
                 <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Client</th>
                 <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Client Ref</th>
                 <th className="text-left px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Case Number</th>
@@ -972,7 +989,7 @@ export default function CasesPage() {
                     </div>
                     <div className="text-xs text-muted truncate sm:hidden mt-0.5">{clientName(c)}</div>
                   </td>
-                  <td className="px-2 sm:px-4 py-3 text-muted truncate max-w-[140px] hidden sm:table-cell">{clientName(c)}</td>
+                  <td className="px-2 sm:px-4 py-3 text-muted break-words hidden sm:table-cell">{clientName(c)}</td>
                   <td className="px-2 sm:px-4 py-3 text-xs text-muted hidden md:table-cell">{c.client_reference || '-'}</td>
                   <td className="px-2 sm:px-4 py-3 text-muted hidden md:table-cell">{c.case_number}</td>
                   <td className="px-2 sm:px-4 py-3">

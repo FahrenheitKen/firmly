@@ -40,7 +40,11 @@ class CaseController extends Controller
                   ->orWhere('our_reference', 'like', "%{$s}%")
                   ->orWhere('status', 'like', "%{$s}%");
             }))
-            ->orderBy('created_at', 'desc')
+            ->when(
+                in_array($request->sort_by, ['our_reference'], true),
+                fn($q) => $q->orderBy($request->sort_by, $request->sort_dir === 'asc' ? 'asc' : 'desc'),
+                fn($q) => $q->orderBy('created_at', 'desc')
+            )
             ->paginate(min((int) $request->query('per_page', 25), 500));
 
         return response()->json([
