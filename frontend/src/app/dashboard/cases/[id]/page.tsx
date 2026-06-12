@@ -1278,7 +1278,7 @@ export default function CaseDetailPage() {
                   options={[{ value: '', label: 'Select client' }, ...clients.map((c) => ({ value: String(c.id), label: c.client_type === 'business' ? c.business_name || '' : `${c.first_name || ''} ${c.last_name || ''}`.trim() }))]}
                   placeholder="Search client..."
                 />
-                {canReassign ? (
+                {canReassign && !caseItem.case_series_id ? (
                   <SearchableSelect
                     label="Assigned To"
                     value={editForm.assigned_to}
@@ -1295,6 +1295,14 @@ export default function CaseDetailPage() {
                       className={`${inputClass} bg-gray-50 cursor-not-allowed`}
                       placeholder="Not assigned"
                     />
+                    {caseItem.case_series_id && (
+                      <p className="text-xs text-muted mt-1">
+                        Assignee is inherited from the series.{' '}
+                        {caseItem.series && (
+                          <Link href={`/dashboard/series/${caseItem.series.id}`} className="text-primary hover:underline">Reassign the series</Link>
+                        )} to change it for all its cases.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

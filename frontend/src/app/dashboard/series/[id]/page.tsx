@@ -17,6 +17,7 @@ interface CaseInSeries {
   case_number: string | null;
   title: string;
   our_reference: string | null;
+  client_reference: string | null;
   status: string;
   assigned_to?: { id: number; first_name: string; last_name: string } | null;
   client?: { id: number; first_name: string | null; last_name: string | null; business_name: string | null } | null;
@@ -484,6 +485,7 @@ export default function SeriesDetailPage() {
               <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider text-left">Actions</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-16">Series</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Our Reference</th>
+              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Client Reference</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Case Number</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Client</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Assigned To</th>
@@ -492,7 +494,7 @@ export default function SeriesDetailPage() {
           </thead>
           <tbody>
             {series.active_cases.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No cases in this series yet. Add one to get started.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted">No cases in this series yet. Add one to get started.</td></tr>
             )}
             {series.active_cases.map((c) => (
               <tr key={c.id} className="border-b border-border last:border-0 hover:bg-gray-50">
@@ -538,6 +540,7 @@ export default function SeriesDetailPage() {
                   <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold">{c.series_suffix || '-'}</span>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs">{c.our_reference || '-'}</td>
+                <td className="px-4 py-3 hidden sm:table-cell font-mono text-xs">{c.client_reference || '-'}</td>
                 <td className="px-4 py-3 hidden sm:table-cell text-xs">{c.case_number || '-'}</td>
                 <td className="px-4 py-3 hidden md:table-cell">{clientName(c.client)}</td>
                 <td className="px-4 py-3 hidden lg:table-cell text-muted">

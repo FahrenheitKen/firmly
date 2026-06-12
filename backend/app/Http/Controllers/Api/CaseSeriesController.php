@@ -121,7 +121,7 @@ class CaseSeriesController extends Controller
             ->where('location_id', $user->active_location_id)
             ->when($viewOwnOnly, fn($q) => $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)));
 
-        $casesEagerLoad = fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'status', 'assigned_to', 'client_id')
+        $casesEagerLoad = fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'client_reference', 'status', 'assigned_to', 'client_id')
             ->when($viewOwnOnly, fn($c) => $c->where('assigned_to', $user->id))
             ->with(['assignedTo:id,first_name,last_name', 'client:id,first_name,last_name,business_name'])
             ->orderByRaw("FIELD(series_suffix, '') DESC, series_suffix ASC");
@@ -176,6 +176,16 @@ class CaseSeriesController extends Controller
         }
 
         $series->update($validated);
+
+        // The series is the single source of truth for assignment. Whenever it is
+        // saved with an assignee, re-sync every case in the series (A, B, C ...) so
+        // they always inherit the series' assignee — this also repairs any drift
+        // (e.g. cases that were created while the series was still unassigned).
+        if (array_key_exists('assigned_to', $validated) && $validated['assigned_to']) {
+            $series->cases()
+                ->where(fn($q) => $q->where('assigned_to', '<>', $validated['assigned_to'])->orWhereNull('assigned_to'))
+                ->update(['assigned_to' => $validated['assigned_to']]);
+        }
 
         return response()->json(['series' => $series->fresh()->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name'])]);
     }

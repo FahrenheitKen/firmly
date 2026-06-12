@@ -45,6 +45,8 @@ export default function OpposingCounselPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({ name: '', firm: '', phone: '', email: '' });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchCounsels = useCallback(async () => {
     if (!token) return;
@@ -79,22 +81,57 @@ export default function OpposingCounselPage() {
   const safePage = Math.min(page, lastPage);
   const filtered = allFiltered.slice((safePage - 1) * perPage, safePage * perPage);
 
+  const openAdd = () => {
+    setEditingId(null);
+    setForm({ name: '', firm: '', phone: '', email: '' });
+    setError('');
+    setShowModal(true);
+  };
+
+  const openEdit = (oc: OpposingCounsel) => {
+    setEditingId(oc.id);
+    setForm({ name: oc.name || '', firm: oc.firm || '', phone: oc.phone || '', email: oc.email || '' });
+    setError('');
+    setShowModal(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || (!form.name.trim() && !form.firm.trim())) return;
     setSaving(true);
     setError('');
     try {
-      await api.post('/opposing-counsels', form, token);
+      if (editingId) {
+        await api.put(`/opposing-counsels/${editingId}`, form, token);
+      } else {
+        await api.post('/opposing-counsels', form, token);
+      }
       setShowModal(false);
       setForm({ name: '', firm: '', phone: '', email: '' });
+      setEditingId(null);
       fetchCounsels();
-      showToast('Opposing counsel added', 'success');
+      showToast(editingId ? 'Opposing counsel updated' : 'Opposing counsel added', 'success');
     } catch (err: unknown) {
       const e = err as { errors?: Record<string, string[]>; message?: string };
       setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (oc: OpposingCounsel) => {
+    if (!token) return;
+    if (!confirm(`Delete opposing counsel "${oc.firm || oc.name}"? This cannot be undone.`)) return;
+    setDeletingId(oc.id);
+    try {
+      await api.delete(`/opposing-counsels/${oc.id}`, token);
+      fetchCounsels();
+      showToast('Opposing counsel deleted', 'success');
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      showToast(e.message || 'Failed to delete', 'error');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -107,7 +144,7 @@ export default function OpposingCounselPage() {
         description="Manage opposing counsels and linked cases"
         action={
           canUpdate ? (
-            <button onClick={() => { setForm({ name: '', firm: '', phone: '', email: '' }); setError(''); setShowModal(true); }} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
+            <button onClick={openAdd} className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark text-sm font-medium">
               + Add Opposing Counsel
             </button>
           ) : null
@@ -141,6 +178,7 @@ export default function OpposingCounselPage() {
                 <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Phone</th>
                 <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Email</th>
                 <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Linked Cases</th>
+                {canUpdate && <th className="text-right px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-28">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -163,6 +201,27 @@ export default function OpposingCounselPage() {
                       </div>
                     )}
                   </td>
+                  {canUpdate && (
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          onClick={() => openEdit(oc)}
+                          title="Edit"
+                          className="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-primary/5 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(oc)}
+                          disabled={deletingId === oc.id}
+                          title="Delete"
+                          className="p-1.5 rounded-lg text-muted hover:text-danger hover:bg-danger/5 transition-colors disabled:opacity-50"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -178,7 +237,7 @@ export default function OpposingCounselPage() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Opposing Counsel" size="sm">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Opposing Counsel' : 'Add Opposing Counsel'} size="sm">
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
           <div>
@@ -202,7 +261,7 @@ export default function OpposingCounselPage() {
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted hover:text-foreground">Cancel</button>
             <button type="submit" disabled={saving || (!form.name.trim() && !form.firm.trim())} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
-              {saving ? 'Saving...' : 'Add Counsel'}
+              {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Add Counsel'}
             </button>
           </div>
         </form>

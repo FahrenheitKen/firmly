@@ -213,6 +213,17 @@ class CaseController extends Controller
             $validated['closed_date'] = now();
         }
 
+        // A case that belongs to a series cannot be reassigned individually — the
+        // series owns the assignment. Reassign the series instead so all its cases inherit.
+        if ($case->case_series_id
+            && array_key_exists('assigned_to', $validated)
+            && (int) $validated['assigned_to'] !== (int) $case->assigned_to
+        ) {
+            return response()->json([
+                'message' => 'This case belongs to a series and cannot be reassigned directly. Reassign the series to change the assignee for all its cases.',
+            ], 422);
+        }
+
         $previousAssignee = $case->assigned_to;
         $case->update($validated);
 
