@@ -134,7 +134,7 @@ class CaseSeriesController extends Controller
                   ->orWhereHas('collaborators', fn($c) => $c->where('user_id', $user->id));
             }));
 
-        $casesEagerLoad = fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'status', 'assigned_to', 'client_id')
+        $casesEagerLoad = fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'client_reference', 'status', 'assigned_to', 'client_id')
             ->when($viewOwnOnly, fn($c) => $c->where('assigned_to', $user->id)->orWhereHas('collaborators', fn($cc) => $cc->where('user_id', $user->id)))
             ->with(['assignedTo:id,first_name,last_name', 'client:id,first_name,last_name,business_name'])
             ->orderByRaw("FIELD(series_suffix, '') DESC, series_suffix ASC");
@@ -192,6 +192,16 @@ class CaseSeriesController extends Controller
         $series->update($validated);
 
         $this->logActivity($request, 'updated', 'series', $series->id, $series->reference);
+
+        // The series is the single source of truth for assignment. Whenever it is
+        // saved with an assignee, re-sync every case in the series (A, B, C ...) so
+        // they always inherit the series' assignee — this also repairs any drift
+        // (e.g. cases that were created while the series was still unassigned).
+        if (array_key_exists('assigned_to', $validated) && $validated['assigned_to']) {
+            $series->cases()
+                ->where(fn($q) => $q->where('assigned_to', '<>', $validated['assigned_to'])->orWhereNull('assigned_to'))
+                ->update(['assigned_to' => $validated['assigned_to']]);
+        }
 
         return response()->json(['series' => $series->fresh()->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name'])]);
     }
@@ -293,6 +303,107 @@ class CaseSeriesController extends Controller
 
         return response()->json([
             'case' => $case->load(['assignedTo:id,first_name,last_name', 'client:id,first_name,last_name,business_name']),
+        ], 201);
+    }
+
+    public function bulkCreateCases(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isOwner() && !$user->hasPermissionSafe('case.create')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $series = CaseSeries::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        $businessId = $user->business_id;
+
+        $validated = $request->validate([
+            'cases' => 'required|array|min:1|max:50',
+            'cases.*.title' => 'required|string|max:255',
+            'cases.*.case_number' => 'nullable|string|max:50',
+            'cases.*.opposing_counsel_id' => "nullable|exists:opposing_counsels,id,business_id,{$businessId}",
+            'cases.*.filed_date' => 'nullable|date',
+            'cases.*.description' => 'nullable|string',
+        ]);
+
+        $firstCase = $series->activeCases()->first();
+        $clientId = $series->client_id ?? $firstCase?->client_id;
+        $assignedTo = $series->assigned_to ?? $firstCase?->assigned_to;
+        $court = $series->station ?? $firstCase?->court;
+        $courtNumberFiled = $series->court_number_filed ?? $firstCase?->court_number_filed;
+        $judge = $series->judge ?? $firstCase?->judge;
+
+        $refParts = explode('/', $series->reference);
+        $yearPart = end($refParts);
+        $basePart = implode('/', array_slice($refParts, 0, -1));
+
+        $created = 0;
+        $createdIds = [];
+        $errors = [];
+        $lastSuffix = $series->last_suffix;
+
+        foreach ($validated['cases'] as $index => $caseData) {
+            if (!empty($caseData['case_number'])) {
+                $exists = Cases::where('case_number', $caseData['case_number'])->exists();
+                if ($exists) {
+                    $errors[] = "Row " . ($index + 1) . ": Case number '{$caseData['case_number']}' already exists.";
+                    continue;
+                }
+            }
+
+            $suffix = $series->nextSuffix();
+            $ourRef = $basePart . '-' . $suffix . '/' . $yearPart;
+
+            $newCase = Cases::create([
+                'business_id' => $businessId,
+                'location_id' => $user->active_location_id,
+                'case_series_id' => $series->id,
+                'series_suffix' => $suffix,
+                'title' => $caseData['title'],
+                'our_reference' => $ourRef,
+                'client_id' => $clientId,
+                'opposing_counsel_id' => $caseData['opposing_counsel_id'] ?? null,
+                'assigned_to' => $assignedTo,
+                'case_number' => $caseData['case_number'] ?? null,
+                'court' => $court,
+                'court_number_filed' => $courtNumberFiled,
+                'judge' => $judge,
+                'filed_date' => $caseData['filed_date'] ?? null,
+                'description' => $caseData['description'] ?? null,
+                'created_by' => $user->id,
+            ]);
+
+            $createdIds[] = $newCase->id;
+            $lastSuffix = $suffix;
+            $created++;
+        }
+
+        if ($lastSuffix) {
+            $series->update(['last_suffix' => $lastSuffix]);
+        }
+
+        if ($assignedTo && $assignedTo !== $user->id) {
+            $assignee = User::find($assignedTo);
+            if ($assignee) {
+                $firstNewCase = $series->activeCases()->latest('id')->first();
+                if ($firstNewCase) {
+                    $assignee->notify(new CaseAssignedNotification($firstNewCase, $user));
+                }
+            }
+        }
+
+        $message = "Created {$created} case(s) in series.";
+        if (!empty($errors)) {
+            $message .= ' ' . implode(' ', $errors);
+        }
+
+        return response()->json([
+            'message' => $message,
+            'created' => $created,
+            'created_ids' => $createdIds,
+            'errors' => $errors,
         ], 201);
     }
 
@@ -418,6 +529,7 @@ class CaseSeriesController extends Controller
         foreach ($cases as $case) {
             CourtProceeding::create(array_merge($validated, [
                 'case_id' => $case->id,
+                'business_id' => $case->business_id,
                 'created_by' => $user->id,
             ]));
             $created++;
@@ -685,6 +797,13 @@ class CaseSeriesController extends Controller
 
         $series->collaborators()->attach($collaboratorId, ['added_by' => $user->id]);
 
+        // Propagate to all active cases in the series
+        foreach ($series->activeCases as $case) {
+            if (!$case->isCollaborator($collaboratorId)) {
+                $case->collaborators()->attach($collaboratorId, ['added_by' => $user->id]);
+            }
+        }
+
         // Notify via case collaborator notification (reuse — links to series cases)
         $collaborator = User::find($collaboratorId);
         if ($collaborator) {
@@ -725,6 +844,11 @@ class CaseSeriesController extends Controller
 
         if (!$detached) {
             return response()->json(['message' => 'User is not a collaborator on this series'], 404);
+        }
+
+        // Remove from all cases in the series
+        foreach ($series->activeCases as $case) {
+            $case->collaborators()->detach($userId);
         }
 
         $this->logActivity($request, 'removed_collaborator', 'series', $series->id, $series->reference, [

@@ -86,10 +86,13 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Opposing Counsel
     Route::get('/opposing-counsels', [OpposingCounselController::class, 'index']);
     Route::post('/opposing-counsels', [OpposingCounselController::class, 'store']);
+    Route::put('/opposing-counsels/{id}', [OpposingCounselController::class, 'update']);
+    Route::delete('/opposing-counsels/{id}', [OpposingCounselController::class, 'destroy']);
 
     // Case Series
     Route::apiResource('case-series', CaseSeriesController::class);
     Route::post('/case-series/{id}/cases', [CaseSeriesController::class, 'createCase']);
+    Route::post('/case-series/{id}/bulk-cases', [CaseSeriesController::class, 'bulkCreateCases']);
     Route::post('/case-series/{id}/link-case', [CaseSeriesController::class, 'linkCase']);
     Route::delete('/case-series/{id}/cases/{caseId}', [CaseSeriesController::class, 'detachCase']);
     Route::post('/case-series/{id}/bulk-event', [CaseSeriesController::class, 'bulkAddEvent']);

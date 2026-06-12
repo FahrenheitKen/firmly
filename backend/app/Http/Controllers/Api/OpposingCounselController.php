@@ -49,4 +49,54 @@ class OpposingCounselController extends Controller
 
         return response()->json(['opposing_counsel' => $oc], 201);
     }
+
+    public function update(Request $request, int $id): JsonResponse
+    {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $oc = OpposingCounsel::where('business_id', $request->user()->business_id)
+            ->where('location_id', $request->user()->active_location_id)
+            ->findOrFail($id);
+
+        $validated = $request->validate([
+            'name'  => 'nullable|string|max:255',
+            'firm'  => 'nullable|string|max:255',
+            'phone' => 'nullable|string|max:50',
+            'email' => 'nullable|email|max:255',
+        ]);
+
+        if (empty($validated['name']) && empty($validated['firm'])) {
+            return response()->json(['errors' => ['name' => ['Please provide a name or firm.']]], 422);
+        }
+
+        $validated['name'] = $validated['name'] ?: ($validated['firm'] ?? '');
+
+        $oc->update($validated);
+
+        return response()->json(['opposing_counsel' => $oc->fresh()]);
+    }
+
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        if (!$request->user()->isOwner() && !$request->user()->hasPermissionSafe('case.update')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $oc = OpposingCounsel::where('business_id', $request->user()->business_id)
+            ->where('location_id', $request->user()->active_location_id)
+            ->withCount('cases')
+            ->findOrFail($id);
+
+        if ($oc->cases_count > 0) {
+            return response()->json([
+                'message' => "Cannot delete: this opposing counsel is linked to {$oc->cases_count} case(s). Unlink them first.",
+            ], 422);
+        }
+
+        $oc->delete();
+
+        return response()->json(['message' => 'Opposing counsel deleted']);
+    }
 }

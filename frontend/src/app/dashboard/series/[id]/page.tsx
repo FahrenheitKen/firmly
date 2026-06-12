@@ -10,6 +10,7 @@ import { useFormatDate } from '@/lib/date';
 import Modal from '@/components/ui/modal';
 import SearchableSelect from '@/components/ui/searchable-select';
 import DatePicker from '@/components/ui/date-picker';
+import { uploadDocuments } from '@/lib/document-upload';
 
 interface CaseInSeries {
   id: number;
@@ -17,6 +18,7 @@ interface CaseInSeries {
   case_number: string | null;
   title: string;
   our_reference: string | null;
+  client_reference: string | null;
   status: string;
   assigned_to?: { id: number; first_name: string; last_name: string } | null;
   client?: { id: number; first_name: string | null; last_name: string | null; business_name: string | null } | null;
@@ -93,6 +95,16 @@ export default function SeriesDetailPage() {
   const [proceedingForm, setProceedingForm] = useState({
     before_court_no: '', magistrate: '', instruction: '', directions: '', time_spent: '', exclude_case_ids: [] as number[],
   });
+
+  const [bulkCaseMode, setBulkCaseMode] = useState(false);
+  const [bulkCaseRows, setBulkCaseRows] = useState<Array<{ title: string; case_number: string; opposing_counsel_id: string; filed_date: string; description: string }>>([
+    { title: '', case_number: '', opposing_counsel_id: '', filed_date: '', description: '' },
+  ]);
+  const [savingBulkCases, setSavingBulkCases] = useState(false);
+
+  const [caseDocFiles, setCaseDocFiles] = useState<File[]>([]);
+  const [caseDocDate, setCaseDocDate] = useState('');
+  const caseDocInputRef = useRef<HTMLInputElement>(null);
 
   const [showAddOC, setShowAddOC] = useState(false);
   const [newOC, setNewOC] = useState({ name: '', firm: '', phone: '', email: '' });
@@ -344,6 +356,10 @@ export default function SeriesDetailPage() {
     setError('');
     setShowAddOC(false);
     setNewOC({ name: '', firm: '', phone: '', email: '' });
+    setBulkCaseMode(false);
+    setBulkCaseRows([{ title: '', case_number: '', opposing_counsel_id: '', filed_date: '', description: '' }]);
+    setCaseDocFiles([]);
+    setCaseDocDate('');
     setShowCaseModal(true);
     loadFormData();
   };
@@ -358,7 +374,12 @@ export default function SeriesDetailPage() {
       for (const [k, v] of Object.entries(caseForm)) {
         payload[k] = v || null;
       }
-      await api.post(`/case-series/${id}/cases`, payload, token);
+      const res = await api.post<{ case: { id: number } }>(`/case-series/${id}/cases`, payload, token);
+      if (caseDocFiles.length > 0 && res.case?.id) {
+        try {
+          await uploadDocuments({ caseId: res.case.id, files: caseDocFiles, documentDate: caseDocDate || undefined, token });
+        } catch { toast('Case created but some files failed to upload', 'warning'); }
+      }
       toast('Case created in series', 'success');
       setShowCaseModal(false);
       fetchSeries();
@@ -366,6 +387,54 @@ export default function SeriesDetailPage() {
       const e = err as { errors?: Record<string, string[]>; message?: string };
       setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to create');
     } finally { setSaving(false); }
+  };
+
+  const addBulkRow = () => {
+    setBulkCaseRows(prev => [...prev, { title: '', case_number: '', opposing_counsel_id: '', filed_date: '', description: '' }]);
+  };
+
+  const removeBulkRow = (index: number) => {
+    setBulkCaseRows(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateBulkRow = (index: number, field: string, value: string) => {
+    setBulkCaseRows(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row));
+  };
+
+  const handleBulkCreateCases = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    const validRows = bulkCaseRows.filter(r => r.title.trim());
+    if (validRows.length === 0) { setError('At least one case with a subject is required.'); return; }
+    setSavingBulkCases(true);
+    setError('');
+    try {
+      const payload = {
+        cases: validRows.map(r => ({
+          title: r.title,
+          case_number: r.case_number || null,
+          opposing_counsel_id: r.opposing_counsel_id ? Number(r.opposing_counsel_id) : null,
+          filed_date: r.filed_date || null,
+          description: r.description || null,
+        })),
+      };
+      const res = await api.post<{ message: string; created: number; created_ids: number[]; errors: string[] }>(`/case-series/${id}/bulk-cases`, payload, token);
+      if (caseDocFiles.length > 0 && res.created_ids?.length) {
+        let docFails = 0;
+        for (const cid of res.created_ids) {
+          try {
+            await uploadDocuments({ caseId: cid, files: caseDocFiles, documentDate: caseDocDate || undefined, token });
+          } catch { docFails++; }
+        }
+        if (docFails > 0) toast(`Files failed to upload to ${docFails} case(s)`, 'warning');
+      }
+      toast(res.message, res.errors?.length ? 'warning' : 'success');
+      setShowCaseModal(false);
+      fetchSeries();
+    } catch (err: unknown) {
+      const e = err as { errors?: Record<string, string[]>; message?: string };
+      setError(e.errors ? Object.values(e.errors).flat().join(', ') : e.message || 'Failed to create cases');
+    } finally { setSavingBulkCases(false); }
   };
 
   const handleBulkEvent = async (e: React.FormEvent) => {
@@ -564,6 +633,7 @@ export default function SeriesDetailPage() {
               <th className="w-16 sm:w-24 px-2 sm:px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider text-left">Actions</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider w-16">Series</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Our Reference</th>
+              <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Client Reference</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden sm:table-cell">Case Number</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden md:table-cell">Client</th>
               <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider hidden lg:table-cell">Assigned To</th>
@@ -572,7 +642,7 @@ export default function SeriesDetailPage() {
           </thead>
           <tbody>
             {series.active_cases.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No cases in this series yet. Add one to get started.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted">No cases in this series yet. Add one to get started.</td></tr>
             )}
             {series.active_cases.map((c) => (
               <tr key={c.id} className="border-b border-border last:border-0 hover:bg-gray-50">
@@ -618,6 +688,7 @@ export default function SeriesDetailPage() {
                   <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold">{c.series_suffix || '-'}</span>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs">{c.our_reference || '-'}</td>
+                <td className="px-4 py-3 hidden sm:table-cell font-mono text-xs">{c.client_reference || '-'}</td>
                 <td className="px-4 py-3 hidden sm:table-cell text-xs">{c.case_number || '-'}</td>
                 <td className="px-4 py-3 hidden md:table-cell">{clientName(c.client)}</td>
                 <td className="px-4 py-3 hidden lg:table-cell text-muted">
@@ -716,82 +787,238 @@ export default function SeriesDetailPage() {
 
       {/* Create Case Modal */}
       <Modal open={showCaseModal} onClose={() => setShowCaseModal(false)} title="Add Case to Series" size="xl">
-        <form onSubmit={handleCreateCase} className="space-y-4">
+        <div className="space-y-4">
+          {/* Single / Bulk toggle */}
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+            <button type="button" onClick={() => setBulkCaseMode(false)} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${!bulkCaseMode ? 'bg-white text-foreground shadow-sm' : 'text-muted hover:text-foreground'}`}>Single</button>
+            <button type="button" onClick={() => setBulkCaseMode(true)} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${bulkCaseMode ? 'bg-white text-foreground shadow-sm' : 'text-muted hover:text-foreground'}`}>Bulk Add</button>
+          </div>
+
           {error && <div className="bg-danger/5 border border-danger/20 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>}
-          <div className="flex items-start gap-2.5 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl text-sm text-primary">
-            <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            Our Reference will be auto-generated as <strong className="mx-1">{series.reference.replace(/\/[^/]*$/, '')}-{series.last_suffix ? String.fromCharCode(series.last_suffix.charCodeAt(series.last_suffix.length - 1) + 1) : 'A'}/{series.reference.split('/').pop()}</strong>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Subject *</label>
-              <input value={caseForm.title} onChange={(e) => setCaseForm({ ...caseForm, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case subject" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Case Number</label>
-              <input value={caseForm.case_number} onChange={(e) => setCaseForm({ ...caseForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="e.g. CMCC E070 OF 2025" />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium">Opposing Counsel</label>
-                {!showAddOC && (
-                  <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+
+          {!bulkCaseMode ? (
+            /* ── Single case form ── */
+            <form onSubmit={handleCreateCase} className="space-y-4">
+              <div className="flex items-start gap-2.5 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl text-sm text-primary">
+                <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Our Reference will be auto-generated as <strong className="mx-1">{series.reference.replace(/\/[^/]*$/, '')}-{series.last_suffix ? String.fromCharCode(series.last_suffix.charCodeAt(series.last_suffix.length - 1) + 1) : 'A'}/{series.reference.split('/').pop()}</strong>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Subject *</label>
+                  <input value={caseForm.title} onChange={(e) => setCaseForm({ ...caseForm, title: e.target.value.toUpperCase() })} className={inputClass} placeholder="Case subject" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Case Number</label>
+                  <input value={caseForm.case_number} onChange={(e) => setCaseForm({ ...caseForm, case_number: e.target.value.toUpperCase() })} className={inputClass} placeholder="e.g. CMCC E070 OF 2025" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium">Opposing Counsel</label>
+                    {!showAddOC && (
+                      <button type="button" onClick={() => setShowAddOC(true)} className="text-xs text-primary hover:underline font-medium">+ Add New</button>
+                    )}
+                  </div>
+                  <SearchableSelect
+                    value={caseForm.opposing_counsel_id}
+                    onChange={(v) => setCaseForm({ ...caseForm, opposing_counsel_id: v })}
+                    options={[{ value: '', label: 'None' }, ...counsels.map(o => ({ value: String(o.id), label: o.name }))]}
+                    placeholder="Search counsel..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Filed Date</label>
+                  <DatePicker value={caseForm.filed_date} onChange={(v) => setCaseForm({ ...caseForm, filed_date: v })} />
+                </div>
+              </div>
+              {showAddOC && (
+                <div className="p-4 bg-gray-50 border border-border rounded-xl space-y-3">
+                  <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Name</label>
+                      <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Firm</label>
+                      <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Phone</label>
+                      <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-1">Email</label>
+                      <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
+                    <button type="button" disabled={savingOC || (!newOC.name.trim() && !newOC.firm.trim())} onClick={saveOpposingCounsel} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                      {savingOC ? 'Saving...' : 'Save & Select'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium mb-1">Parties</label>
+                <textarea value={caseForm.description} onChange={(e) => setCaseForm({ ...caseForm, description: e.target.value })} rows={2} className={inputClass} placeholder="List the parties involved" />
+              </div>
+              {/* Document upload */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Attach Documents (optional)</label>
+                <input ref={caseDocInputRef} type="file" multiple onChange={(e) => { const selected = Array.from(e.target.files || []).filter(f => f.name && f.size > 0); if (selected.length) setCaseDocFiles(prev => [...prev, ...selected]); e.target.value = ''; }} className="hidden" />
+                <div
+                  onClick={() => caseDocInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-primary', 'bg-primary/5'); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); }}
+                  onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); if (e.dataTransfer.files.length) setCaseDocFiles(prev => [...prev, ...Array.from(e.dataTransfer.files).filter(f => f.name && f.size > 0)]); }}
+                  className="flex flex-col items-center justify-center w-full border-2 border-dashed border-border rounded-xl py-4 cursor-pointer hover:border-primary/40 hover:text-primary transition-colors text-center"
+                >
+                  <svg className="w-5 h-5 mb-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                  <span className="text-xs text-muted">Click or drag files here</span>
+                </div>
+                {caseDocFiles.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {caseDocFiles.map((f, i) => {
+                      const sizeKB = f.size / 1024;
+                      const sizeLabel = sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB.toFixed(0)} KB`;
+                      return (
+                        <div key={i} className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-border rounded-lg">
+                          <svg className="w-3.5 h-3.5 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          <span className="flex-1 text-xs truncate">{f.name}</span>
+                          <span className="text-[10px] text-muted shrink-0">{sizeLabel}</span>
+                          <button type="button" onClick={() => setCaseDocFiles(prev => prev.filter((_, idx) => idx !== i))} className="p-0.5 text-danger/60 hover:text-danger rounded transition-colors shrink-0">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {caseDocFiles.length > 0 && (
+                  <div className="mt-2">
+                    <label className="block text-xs text-muted mb-1">Document Date</label>
+                    <DatePicker value={caseDocDate} onChange={setCaseDocDate} />
+                  </div>
                 )}
               </div>
-              <SearchableSelect
-                value={caseForm.opposing_counsel_id}
-                onChange={(v) => setCaseForm({ ...caseForm, opposing_counsel_id: v })}
-                options={[{ value: '', label: 'None' }, ...counsels.map(o => ({ value: String(o.id), label: o.name }))]}
-                placeholder="Search counsel..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Filed Date</label>
-              <DatePicker value={caseForm.filed_date} onChange={(v) => setCaseForm({ ...caseForm, filed_date: v })} />
-            </div>
-          </div>
-          {showAddOC && (
-            <div className="p-4 bg-gray-50 border border-border rounded-xl space-y-3">
-              <p className="text-xs font-medium text-muted uppercase tracking-wider">New Opposing Counsel</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-muted mb-1">Name</label>
-                  <input value={newOC.name} onChange={(e) => setNewOC({ ...newOC, name: e.target.value })} className={inputClass} placeholder="Full name" />
-                </div>
-                <div>
-                  <label className="block text-xs text-muted mb-1">Firm</label>
-                  <input value={newOC.firm} onChange={(e) => setNewOC({ ...newOC, firm: e.target.value })} className={inputClass} placeholder="Law firm" />
-                </div>
-                <div>
-                  <label className="block text-xs text-muted mb-1">Phone</label>
-                  <input value={newOC.phone} onChange={(e) => setNewOC({ ...newOC, phone: e.target.value })} className={inputClass} placeholder="Phone number" />
-                </div>
-                <div>
-                  <label className="block text-xs text-muted mb-1">Email</label>
-                  <input type="email" value={newOC.email} onChange={(e) => setNewOC({ ...newOC, email: e.target.value })} className={inputClass} placeholder="Email address" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setShowAddOC(false); setNewOC({ name: '', firm: '', phone: '', email: '' }); }} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background transition-colors text-muted">Cancel</button>
-                <button type="button" disabled={savingOC || (!newOC.name.trim() && !newOC.firm.trim())} onClick={saveOpposingCounsel} className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 transition-colors">
-                  {savingOC ? 'Saving...' : 'Save & Select'}
+              <div className="flex justify-end gap-3 pt-4 border-t border-border">
+                <button type="button" onClick={() => setShowCaseModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted">Cancel</button>
+                <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                  {saving ? 'Creating...' : 'Create Case'}
                 </button>
               </div>
-            </div>
+            </form>
+          ) : (
+            /* ── Bulk add form ── */
+            <form onSubmit={handleBulkCreateCases} className="space-y-4">
+              <div className="flex items-start gap-2.5 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl text-sm text-primary">
+                <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Add multiple cases at once. Each case will get an auto-generated reference ({series.reference}-A, -B, -C...). Client, court, and assignee are inherited from the series.
+              </div>
+
+              <div className="space-y-3">
+                {bulkCaseRows.map((row, index) => (
+                  <div key={index} className="p-3 bg-gray-50 border border-border rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-muted uppercase tracking-wider">Case {index + 1}</span>
+                      {bulkCaseRows.length > 1 && (
+                        <button type="button" onClick={() => removeBulkRow(index)} className="p-1 text-danger/60 hover:text-danger hover:bg-danger/5 rounded transition-colors" title="Remove">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Subject *</label>
+                        <input value={row.title} onChange={(e) => updateBulkRow(index, 'title', e.target.value.toUpperCase())} className={inputClass} placeholder="Case subject" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Case Number</label>
+                        <input value={row.case_number} onChange={(e) => updateBulkRow(index, 'case_number', e.target.value.toUpperCase())} className={inputClass} placeholder="e.g. CMCC E070 OF 2025" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Opposing Counsel</label>
+                        <SearchableSelect
+                          value={row.opposing_counsel_id}
+                          onChange={(v) => updateBulkRow(index, 'opposing_counsel_id', v)}
+                          options={[{ value: '', label: 'None' }, ...counsels.map(o => ({ value: String(o.id), label: o.name }))]}
+                          placeholder="Search..."
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Filed Date</label>
+                        <DatePicker value={row.filed_date} onChange={(v) => updateBulkRow(index, 'filed_date', v)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted mb-1">Parties</label>
+                        <input value={row.description} onChange={(e) => updateBulkRow(index, 'description', e.target.value)} className={inputClass} placeholder="List the parties involved" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button type="button" onClick={addBulkRow} className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-primary border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Add Another Case
+              </button>
+
+              {/* Document upload for all bulk cases */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Attach Documents to All Cases (optional)</label>
+                <input ref={caseDocInputRef} type="file" multiple onChange={(e) => { const selected = Array.from(e.target.files || []).filter(f => f.name && f.size > 0); if (selected.length) setCaseDocFiles(prev => [...prev, ...selected]); e.target.value = ''; }} className="hidden" />
+                <div
+                  onClick={() => caseDocInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-primary', 'bg-primary/5'); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); }}
+                  onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-primary', 'bg-primary/5'); if (e.dataTransfer.files.length) setCaseDocFiles(prev => [...prev, ...Array.from(e.dataTransfer.files).filter(f => f.name && f.size > 0)]); }}
+                  className="flex flex-col items-center justify-center w-full border-2 border-dashed border-border rounded-xl py-4 cursor-pointer hover:border-primary/40 hover:text-primary transition-colors text-center"
+                >
+                  <svg className="w-5 h-5 mb-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                  <span className="text-xs text-muted">Click or drag files here</span>
+                  <span className="text-[10px] text-muted mt-0.5">Files will be uploaded to every case created above</span>
+                </div>
+                {caseDocFiles.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {caseDocFiles.map((f, i) => {
+                      const sizeKB = f.size / 1024;
+                      const sizeLabel = sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB.toFixed(0)} KB`;
+                      return (
+                        <div key={i} className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-border rounded-lg">
+                          <svg className="w-3.5 h-3.5 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          <span className="flex-1 text-xs truncate">{f.name}</span>
+                          <span className="text-[10px] text-muted shrink-0">{sizeLabel}</span>
+                          <button type="button" onClick={() => setCaseDocFiles(prev => prev.filter((_, idx) => idx !== i))} className="p-0.5 text-danger/60 hover:text-danger rounded transition-colors shrink-0">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {caseDocFiles.length > 0 && (
+                  <div className="mt-2">
+                    <label className="block text-xs text-muted mb-1">Document Date</label>
+                    <DatePicker value={caseDocDate} onChange={setCaseDocDate} />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-border">
+                <button type="button" onClick={() => setShowCaseModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted">Cancel</button>
+                <button type="submit" disabled={savingBulkCases || bulkCaseRows.every(r => !r.title.trim())} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
+                  {savingBulkCases ? 'Creating...' : `Create ${bulkCaseRows.filter(r => r.title.trim()).length} Case(s)`}
+                </button>
+              </div>
+            </form>
           )}
-          <div>
-            <label className="block text-sm font-medium mb-1">Parties</label>
-            <textarea value={caseForm.description} onChange={(e) => setCaseForm({ ...caseForm, description: e.target.value })} rows={2} className={inputClass} placeholder="List the parties involved" />
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <button type="button" onClick={() => setShowCaseModal(false)} className="px-5 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-background transition-colors text-muted">Cancel</button>
-            <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary-dark disabled:opacity-50 transition-colors">
-              {saving ? 'Creating...' : 'Create Case'}
-            </button>
-          </div>
-        </form>
+        </div>
       </Modal>
 
       {/* Bulk Event Modal */}

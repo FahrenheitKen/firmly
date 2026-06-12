@@ -44,7 +44,11 @@ class CaseController extends Controller
                   ->orWhere('our_reference', 'like', "%{$s}%")
                   ->orWhere('status', 'like', "%{$s}%");
             }))
-            ->orderBy('created_at', 'desc')
+            ->when(
+                in_array($request->sort_by, ['our_reference'], true),
+                fn($q) => $q->orderBy($request->sort_by, $request->sort_dir === 'asc' ? 'asc' : 'desc'),
+                fn($q) => $q->orderBy('created_at', 'desc')
+            )
             ->paginate(min((int) $request->query('per_page', 25), 500));
 
         return response()->json([
@@ -213,6 +217,17 @@ class CaseController extends Controller
 
         if (isset($validated['status']) && $validated['status'] === 'Closed' && !$case->closed_date && empty($validated['closed_date'])) {
             $validated['closed_date'] = now();
+        }
+
+        // A case that belongs to a series cannot be reassigned individually — the
+        // series owns the assignment. Reassign the series instead so all its cases inherit.
+        if ($case->case_series_id
+            && array_key_exists('assigned_to', $validated)
+            && (int) $validated['assigned_to'] !== (int) $case->assigned_to
+        ) {
+            return response()->json([
+                'message' => 'This case belongs to a series and cannot be reassigned directly. Reassign the series to change the assignee for all its cases.',
+            ], 422);
         }
 
         $previousAssignee = $case->assigned_to;
