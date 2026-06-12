@@ -25,7 +25,15 @@ class CaseEventController extends Controller
             ->where('cases.business_id', $user->business_id)
             ->where('cases.location_id', $user->active_location_id)
             ->whereNull('cases.deleted_at')
-            ->when($user->restrictedToOwnCases(), fn($q) => $q->where('cases.assigned_to', $user->id))
+            ->when($user->restrictedToOwnCases(), fn($q) => $q->where(function ($q) use ($user) {
+                $q->where('cases.assigned_to', $user->id)
+                  ->orWhereExists(function ($sub) use ($user) {
+                      $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                          ->from('case_collaborators')
+                          ->whereColumn('case_collaborators.case_id', 'cases.id')
+                          ->where('case_collaborators.user_id', $user->id);
+                  });
+            }))
             ->with([
                 'case:id,case_number,title,assigned_to,case_series_id,our_reference,series_suffix',
                 'case.assignedTo:id,first_name,last_name',
@@ -50,7 +58,7 @@ class CaseEventController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -69,7 +77,7 @@ class CaseEventController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -109,7 +117,7 @@ class CaseEventController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -148,7 +156,7 @@ class CaseEventController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

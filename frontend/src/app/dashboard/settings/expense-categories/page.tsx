@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast-context';
@@ -116,8 +116,8 @@ export default function ExpenseCategoriesPage() {
             </thead>
             <tbody>
               {categories.map((cat) => (
-                <>
-                  <tr key={cat.id} className="border-b border-border hover:bg-gray-50">
+                <React.Fragment key={cat.id}>
+                  <tr className="border-b border-border hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">{cat.name}</td>
                     <td className="px-4 py-3 text-muted font-mono text-xs hidden sm:table-cell">{cat.code || '-'}</td>
                     <td className="px-4 py-3 text-muted hidden md:table-cell">{cat.sub_categories.length}</td>
@@ -145,7 +145,7 @@ export default function ExpenseCategoriesPage() {
                       </td>
                     </tr>
                   ))}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

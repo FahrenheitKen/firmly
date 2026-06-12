@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\DB;
 
 class CourtProceedingController extends Controller
 {
+    use \App\Traits\LogsActivity;
+
     public function index(Request $request, int $caseId): JsonResponse
     {
         $case = $this->resolveCase($request, $caseId);
@@ -87,6 +89,8 @@ class CourtProceedingController extends Controller
             'dueForEvent:id,event_type,event_date',
             'bringUpEvent:id,event_type,event_date',
         ]);
+
+        $this->logActivity($request, 'created', 'proceeding', $proceeding->id, $case->case_number ?? $case->title);
 
         return response()->json(['proceeding' => $proceeding], 201);
     }
@@ -173,6 +177,8 @@ class CourtProceedingController extends Controller
             'bringUpEvent:id,event_type,event_date',
         ]);
 
+        $this->logActivity($request, 'updated', 'proceeding', $proceeding->id, $case->case_number ?? $case->title);
+
         return response()->json(['proceeding' => $proceeding]);
     }
 
@@ -198,6 +204,8 @@ class CourtProceedingController extends Controller
             }
         });
 
+        $this->logActivity($request, 'deleted', 'proceeding', $proceedingId, $case->case_number ?? $case->title);
+
         return response()->json(['message' => 'Proceeding deleted']);
     }
 
@@ -207,7 +215,7 @@ class CourtProceedingController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             abort(403, 'Unauthorized');
         }
 

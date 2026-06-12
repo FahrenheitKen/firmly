@@ -242,7 +242,11 @@
       "Bash(rm:*)",
       "Bash(composer remove:*)",
       "Bash(C:/laragon/bin/mysql/mysql-8.0.30-winx64/bin/mysqld.exe:*)",
-      "Bash(C:/laragon/bin/mysql/mysql-8.0.30-winx64/bin/mysql.exe -u root -e \"SELECT 1 AS connected;\")"
+      "Bash(C:/laragon/bin/mysql/mysql-8.0.30-winx64/bin/mysql.exe -u root -e \"SELECT 1 AS connected;\")",
+      "Bash(claude:*)",
+      "Bash(npm show:*)",
+      "WebSearch",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Collaborators:', json.dumps\\(d['case'].get\\('collaborators', []\\), indent=2\\)\\)\")"
     ]
   },
   "enableAllProjectMcpServers": true,

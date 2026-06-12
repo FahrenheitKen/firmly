@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\TaxRateController;
 use App\Http\Controllers\Api\CaseSeriesController;
 use App\Http\Controllers\Api\TaskController;
+use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\UserProfileController;
 use Illuminate\Support\Facades\Route;
@@ -97,11 +98,17 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::post('/case-series/{id}/bulk-task', [CaseSeriesController::class, 'bulkAddTask']);
     Route::get('/case-series/{id}/tasks', [CaseSeriesController::class, 'seriesTasks']);
     Route::put('/case-series/{id}/bulk-task-status', [CaseSeriesController::class, 'bulkUpdateTaskStatus']);
+    Route::get('/case-series/{id}/collaborators', [CaseSeriesController::class, 'collaborators']);
+    Route::post('/case-series/{id}/collaborators', [CaseSeriesController::class, 'addCollaborator']);
+    Route::delete('/case-series/{id}/collaborators/{userId}', [CaseSeriesController::class, 'removeCollaborator']);
 
     // Cases
     Route::apiResource('cases', CaseController::class);
     Route::post('/cases/{id}/duplicate', [CaseController::class, 'duplicate']);
     Route::put('/cases/{id}/status', [CaseController::class, 'toggleStatus']);
+    Route::get('/cases/{id}/collaborators', [CaseController::class, 'collaborators']);
+    Route::post('/cases/{id}/collaborators', [CaseController::class, 'addCollaborator']);
+    Route::delete('/cases/{id}/collaborators/{userId}', [CaseController::class, 'removeCollaborator']);
 
     // Case Documents
     Route::get('/cases/{caseId}/documents', [CaseDocumentController::class, 'index']);
@@ -136,6 +143,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::apiResource('tasks', TaskController::class);
     Route::get('/tasks/{id}/comments', [TaskController::class, 'comments']);
     Route::post('/tasks/{id}/comments', [TaskController::class, 'storeComment']);
+
+    // Activity Logs
+    Route::get('/activity-logs', [ActivityLogController::class, 'index']);
 
     // Notifications
     Route::get('/notifications', [NotificationController::class, 'index']);

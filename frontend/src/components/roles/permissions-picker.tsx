@@ -25,7 +25,7 @@ const groupPalette: Record<string, { bg: string; dot: string; label: string }> =
   case:              { bg: 'bg-violet-50', dot: 'bg-violet-500', label: 'text-violet-700' },
   client:            { bg: 'bg-emerald-50', dot: 'bg-emerald-500', label: 'text-emerald-700' },
   expense:           { bg: 'bg-amber-50', dot: 'bg-amber-500', label: 'text-amber-700' },
-  expense_report:    { bg: 'bg-orange-50', dot: 'bg-orange-500', label: 'text-orange-700' },
+  reports:           { bg: 'bg-orange-50', dot: 'bg-orange-500', label: 'text-orange-700' },
   business_settings: { bg: 'bg-primary/5', dot: 'bg-primary', label: 'text-primary' },
   general:           { bg: 'bg-background', dot: 'bg-muted', label: 'text-muted' },
 };
@@ -50,6 +50,8 @@ const permLabels: Record<string, string> = {
 // Per-permission display label overrides. Falls back to permLabels[action] then
 // to the raw action string.
 const permActionLabels: Record<string, string> = {
+  'expense_report.view': 'Expense Report',
+  'activity_log.view': 'Activity Logs',
   'business_settings.access': 'Roles & Email OAuth',
   'business_settings.general': 'General Settings',
   'business_settings.firm_branches': 'Firm Branches',
@@ -58,6 +60,7 @@ const permActionLabels: Record<string, string> = {
 
 // Per-group display label overrides. Falls back to a Title Case of the group key.
 const groupLabels: Record<string, string> = {
+  reports: 'Reports',
   business_settings: 'Settings',
 };
 
@@ -82,6 +85,7 @@ const permDescriptions: Record<string, string> = {
   'expense.delete': 'Delete expenses',
   'expense.approve': 'Approve or reject expenses',
   'expense_report.view': 'View expense reports',
+  'activity_log.view': 'View activity logs',
   'business_settings.access': 'Manage roles and email OAuth credentials',
   'business_settings.general': 'Access the General Settings module',
   'business_settings.firm_branches': 'Access the Firm Branches module',
@@ -96,10 +100,16 @@ export default function PermissionsPicker({ selectedPerms, onToggle, token }: Pr
       .then((res) => setAllPermissions(res.permissions));
   }, [token]);
 
+  const GROUP_REMAP: Record<string, string> = {
+    expense_report: 'reports',
+    activity_log: 'reports',
+  };
+
   const permGroups: Record<string, string[]> = {};
   allPermissions.forEach((p) => {
-    const group = p.split('.')[0] || 'general';
-    if (EXCLUDED_GROUPS.has(group)) return;
+    const rawGroup = p.split('.')[0] || 'general';
+    if (EXCLUDED_GROUPS.has(rawGroup)) return;
+    const group = GROUP_REMAP[rawGroup] || rawGroup;
     if (!permGroups[group]) permGroups[group] = [];
     permGroups[group].push(p);
   });
@@ -165,15 +175,11 @@ export default function PermissionsPicker({ selectedPerms, onToggle, token }: Pr
                       <span className={`text-sm ${checked ? 'font-medium text-foreground' : 'text-foreground/60'}`}>
                         {permActionLabels[p] || permLabels[action] || action}
                       </span>
-                      <div className="relative group/icon ml-auto">
+                      <span className="ml-auto shrink-0" title={permDescriptions[p] || `Allows ${action} access for ${group}`}>
                         <svg className="w-3.5 h-3.5 text-muted/40 hover:text-muted transition-colors cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <div className="absolute bottom-full right-0 mb-2 w-56 px-3 py-2 bg-primary text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-10 pointer-events-none">
-                          {permDescriptions[p] || `Allows ${action} access for ${group}`}
-                          <div className="absolute top-full right-3 -translate-y-1/2 border-4 border-transparent border-t-primary" />
-                        </div>
-                      </div>
+                      </span>
                     </div>
                   </label>
                 );

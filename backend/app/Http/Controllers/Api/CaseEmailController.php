@@ -25,7 +25,7 @@ class CaseEmailController extends Controller
             ->where('business_id', $businessId)
             ->firstOrFail();
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -85,7 +85,7 @@ class CaseEmailController extends Controller
             $sourceCase = Cases::where('id', $email->case_id)
                 ->where('business_id', $businessId)
                 ->first();
-            if ($sourceCase && !$request->user()->canViewCase($sourceCase->assigned_to)) {
+            if ($sourceCase && !$request->user()->canViewCase($sourceCase->assigned_to, $sourceCase->id)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
         }
@@ -96,7 +96,7 @@ class CaseEmailController extends Controller
             $targetCase = Cases::where('id', $validated['case_id'])
                 ->where('business_id', $businessId)
                 ->firstOrFail();
-            if (!$request->user()->canViewCase($targetCase->assigned_to)) {
+            if (!$request->user()->canViewCase($targetCase->assigned_to, $targetCase->id)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
         }
@@ -129,7 +129,7 @@ class CaseEmailController extends Controller
             $linkedCase = Cases::where('id', $email->case_id)
                 ->where('business_id', $businessId)
                 ->first();
-            if ($linkedCase && !$request->user()->canViewCase($linkedCase->assigned_to)) {
+            if ($linkedCase && !$request->user()->canViewCase($linkedCase->assigned_to, $linkedCase->id)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
         } elseif (!$request->user()->canViewAnyCase()) {
@@ -207,7 +207,7 @@ class CaseEmailController extends Controller
             ->where('business_id', $businessId)
             ->firstOrFail();
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

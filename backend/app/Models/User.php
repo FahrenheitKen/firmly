@@ -121,11 +121,11 @@ class User extends Authenticatable
     }
 
     /**
-     * Whether the user can see a specific case identified by its assigned_to
-     * column. Owners and view_all users see everything; view_own users see
-     * only cases assigned to them.
+     * Whether the user can see a specific case. Owners and view_all users see
+     * everything; view_own users see cases assigned to them OR where they are
+     * a collaborator.
      */
-    public function canViewCase(?int $assignedTo): bool
+    public function canViewCase(?int $assignedTo, ?int $caseId = null): bool
     {
         if ($this->isOwner()) {
             return true;
@@ -133,8 +133,15 @@ class User extends Authenticatable
         if ($this->hasPermissionSafe('case.view_all') || $this->hasPermissionSafe('case.view')) {
             return true;
         }
-        if ($this->hasPermissionSafe('case.view_own') && $assignedTo !== null && $assignedTo === $this->id) {
-            return true;
+        if ($this->hasPermissionSafe('case.view_own')) {
+            if ($assignedTo !== null && $assignedTo === $this->id) {
+                return true;
+            }
+            if ($caseId !== null) {
+                return \App\Models\Cases::where('id', $caseId)
+                    ->whereHas('collaborators', fn($q) => $q->where('user_id', $this->id))
+                    ->exists();
+            }
         }
         return false;
     }

@@ -11,6 +11,8 @@ use Illuminate\Http\Request;
 
 class ExpenseController extends Controller
 {
+    use \App\Traits\LogsActivity;
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -136,6 +138,8 @@ class ExpenseController extends Controller
 
         $expense = Expense::create($validated);
 
+        $this->logActivity($request, 'created', 'expense', $expense->id, $expense->expense_number);
+
         return response()->json([
             'expense' => $expense->load([
                 'category:id,name',
@@ -230,6 +234,8 @@ class ExpenseController extends Controller
 
         $expense->update($validated);
 
+        $this->logActivity($request, 'updated', 'expense', $expense->id, $expense->expense_number);
+
         return response()->json([
             'expense' => $expense->fresh()->load([
                 'category:id,name',
@@ -253,7 +259,11 @@ class ExpenseController extends Controller
         $expense = Expense::where('business_id', $user->business_id)
             ->where('location_id', $user->active_location_id)
             ->findOrFail($id);
+
+        $label = $expense->expense_number;
         $expense->delete();
+
+        $this->logActivity($request, 'deleted', 'expense', $id, $label);
 
         return response()->json(['message' => 'Deleted']);
     }

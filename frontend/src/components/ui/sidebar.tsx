@@ -48,6 +48,17 @@ export default function Sidebar() {
     return items;
   }, [isOwner, can]);
 
+  const reportsChildren = useMemo(() => {
+    const items: Array<{ label: string; href: string }> = [];
+    if (isOwner || can('expense_report.view')) {
+      items.push({ label: 'Expense Report', href: '/dashboard/expenses/report' });
+    }
+    if (isOwner || can('activity_log.view')) {
+      items.push({ label: 'Activity Log', href: '/dashboard/reports/activity-log' });
+    }
+    return items;
+  }, [isOwner, can]);
+
   const settingsChildren = useMemo(() => {
     const umbrella = isOwner || can('business_settings.access');
     const items: Array<{ label: string; href: string }> = [];
@@ -68,19 +79,22 @@ export default function Sidebar() {
 
   const isCaseActive = caseChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
   const isUsersActive = usersChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
-  const isExpenseActive = expenseChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
+  const isReportsActive = reportsChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
+  const isExpenseActive = !isReportsActive && expenseChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
   const isSettingsActive = settingsChildren.some((c) => pathname === c.href || pathname.startsWith(c.href + '/'));
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [caseOpen, setCaseOpen] = useState(isCaseActive);
   const [usersOpen, setUsersOpen] = useState(isUsersActive);
   const [expenseOpen, setExpenseOpen] = useState(isExpenseActive);
+  const [reportsOpen, setReportsOpen] = useState(isReportsActive);
   const [settingsOpen, setSettingsOpen] = useState(isSettingsActive);
 
   useEffect(() => {
     setCaseOpen(isCaseActive);
     setUsersOpen(isUsersActive);
     setExpenseOpen(isExpenseActive);
+    setReportsOpen(isReportsActive);
     setSettingsOpen(isSettingsActive);
   }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -240,6 +254,47 @@ export default function Sidebar() {
           {expenseOpen && (
             <div className="ml-3 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
               {expenseChildren.map((child) => {
+                const childActive = pathname === child.href || pathname.startsWith(child.href + '/');
+                return (
+                  <Link
+                    key={child.href}
+                    href={child.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      childActive ? 'text-white bg-white/10' : 'text-sidebar-text/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <span>{child.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        )}
+
+        {reportsChildren.length > 0 && (
+        <div className="pt-1">
+          <button
+            onClick={() => setReportsOpen(!reportsOpen)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              isReportsActive ? 'bg-sidebar-active text-white' : 'text-sidebar-text hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span className="flex-1 text-left">Reports</span>
+            {reportsOpen && (
+              <svg className="w-3.5 h-3.5 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            )}
+          </button>
+
+          {reportsOpen && (
+            <div className="ml-3 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
+              {reportsChildren.map((child) => {
                 const childActive = pathname === child.href || pathname.startsWith(child.href + '/');
                 return (
                   <Link

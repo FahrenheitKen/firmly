@@ -75,4 +75,15 @@ class Cases extends Model
     {
         return $this->belongsTo(CaseSeries::class, 'case_series_id');
     }
+
+    public function collaborators()
+    {
+        return $this->belongsToMany(User::class, 'case_collaborators', 'case_id', 'user_id')
+            ->withPivot('added_by', 'created_at');
+    }
+
+    public function isCollaborator(int $userId): bool
+    {
+        return $this->collaborators()->where('user_id', $userId)->exists();
+    }
 }

@@ -17,13 +17,15 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CaseDocumentController extends Controller
 {
+    use \App\Traits\LogsActivity;
+
     public function index(Request $request, int $caseId): JsonResponse
     {
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -48,7 +50,7 @@ class CaseDocumentController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -102,6 +104,10 @@ class CaseDocumentController extends Controller
             ->with('uploadedBy:id,first_name,last_name')
             ->get();
 
+        foreach ($uploaded as $doc) {
+            $this->logActivity($request, 'created', 'document', $doc->id, $doc->original_name);
+        }
+
         return response()->json(['documents' => $result], 201);
     }
 
@@ -125,7 +131,7 @@ class CaseDocumentController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -160,7 +166,7 @@ class CaseDocumentController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -249,7 +255,7 @@ class CaseDocumentController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -371,7 +377,10 @@ class CaseDocumentController extends Controller
         $storage->markForDeletion($document);
 
         // Soft delete the DB row; cron does forceDelete after retention window.
+        $label = $document->original_name;
         $document->delete();
+
+        $this->logActivity($request, 'deleted', 'document', $documentId, $label);
 
         return response()->json(['message' => 'Document deleted']);
     }
@@ -396,7 +405,7 @@ class CaseDocumentController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($caseId);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             abort(403, 'Unauthorized');
         }
 

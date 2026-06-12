@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 
 class TaskController extends Controller
 {
+    use \App\Traits\LogsActivity;
     private const VALID_STATUSES = ['Pending', 'In Progress', 'Completed', 'Cancelled'];
     private const VALID_PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
 
@@ -123,7 +124,7 @@ class TaskController extends Controller
             if (!$case) {
                 return response()->json(['message' => 'Case not found in this branch'], 422);
             }
-            if (!$user->canViewCase($case->assigned_to)) {
+            if (!$user->canViewCase($case->assigned_to, $case->id)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
         }
@@ -193,6 +194,8 @@ class TaskController extends Controller
                 $assignee->notify(new TaskAssignedNotification($task, $user));
             }
         }
+
+        $this->logActivity($request, 'created', 'task', $task->id, $task->title);
 
         return response()->json([
             'task' => $task->load([
@@ -355,6 +358,8 @@ class TaskController extends Controller
             }
         }
 
+        $this->logActivity($request, 'updated', 'task', $task->id, $task->title);
+
         return response()->json([
             'task' => $task->fresh(['assignee:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'completedBy:id,first_name,last_name', 'case:id,case_number,title']),
         ]);
@@ -372,7 +377,10 @@ class TaskController extends Controller
             ->where('location_id', $user->active_location_id)
             ->findOrFail($id);
 
+        $label = $task->title;
         $task->delete();
+
+        $this->logActivity($request, 'deleted', 'task', $id, $label);
 
         return response()->json(['message' => 'Task deleted']);
     }

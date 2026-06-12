@@ -10,6 +10,8 @@ use Illuminate\Support\Str;
 
 class ClientController extends Controller
 {
+    use \App\Traits\LogsActivity;
+
     public function index(Request $request): JsonResponse
     {
         $businessId = $request->user()->business_id;
@@ -106,6 +108,9 @@ class ClientController extends Controller
 
         $client = Client::create($validated);
 
+        $label = $client->business_name ?: trim(($client->first_name ?? '') . ' ' . ($client->last_name ?? ''));
+        $this->logActivity($request, 'created', 'client', $client->id, $label);
+
         return response()->json(['client' => $client], 201);
     }
 
@@ -150,6 +155,9 @@ class ClientController extends Controller
 
         $client->update($validated);
 
+        $label = $client->business_name ?: trim(($client->first_name ?? '') . ' ' . ($client->last_name ?? ''));
+        $this->logActivity($request, 'updated', 'client', $client->id, $label);
+
         return response()->json(['client' => $client]);
     }
 
@@ -162,7 +170,10 @@ class ClientController extends Controller
         $client = Client::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
+        $label = $client->business_name ?: trim(($client->first_name ?? '') . ' ' . ($client->last_name ?? ''));
         $client->delete();
+
+        $this->logActivity($request, 'deleted', 'client', $id, $label);
 
         return response()->json(['message' => 'Client deleted']);
     }

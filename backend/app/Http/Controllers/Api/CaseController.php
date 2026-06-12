@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 
 class CaseController extends Controller
 {
+    use \App\Traits\LogsActivity;
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -30,7 +31,10 @@ class CaseController extends Controller
 
         $cases = Cases::where('business_id', $businessId)
             ->where('location_id', $activeLocationId)
-            ->when($user->restrictedToOwnCases(), fn($q) => $q->where('assigned_to', $user->id))
+            ->when($user->restrictedToOwnCases(), fn($q) => $q->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhereHas('collaborators', fn($c) => $c->where('user_id', $user->id));
+            }))
             ->with(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'createdBy:id,first_name,last_name', 'opposingCounsel:id,name,firm', 'series:id,reference,name'])
             ->when($request->client_id, fn($q, $cid) => $q->where('client_id', $cid))
             ->when($request->assigned_to, fn($q, $uid) => $q->where('assigned_to', $uid))
@@ -149,6 +153,8 @@ class CaseController extends Controller
             }
         }
 
+        $this->logActivity($request, 'created', 'case', $case->id, $case->our_reference ?: $case->title);
+
         return response()->json(['case' => $case->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm'])], 201);
     }
 
@@ -156,10 +162,10 @@ class CaseController extends Controller
     {
         $case = Cases::where('business_id', $request->user()->business_id)
             ->where('location_id', $request->user()->active_location_id)
-            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel', 'series:id,reference,name,common_parties'])
+            ->with(['client', 'assignedTo', 'createdBy', 'opposingCounsel', 'series:id,reference,name,common_parties', 'collaborators:id,first_name,last_name'])
             ->findOrFail($id);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -176,7 +182,7 @@ class CaseController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -223,6 +229,8 @@ class CaseController extends Controller
             }
         }
 
+        $this->logActivity($request, 'updated', 'case', $case->id, $case->our_reference ?: $case->title);
+
         return response()->json(['case' => $case->fresh()->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm'])]);
     }
 
@@ -236,11 +244,14 @@ class CaseController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $label = $case->our_reference ?: $case->title;
         $case->delete();
+
+        $this->logActivity($request, 'deleted', 'case', $id, $label);
 
         return response()->json(['message' => 'Case deleted']);
     }
@@ -256,7 +267,7 @@ class CaseController extends Controller
             ->where('location_id', $user->active_location_id)
             ->findOrFail($id);
 
-        if (!$user->canViewCase($original->assigned_to)) {
+        if (!$user->canViewCase($original->assigned_to, $original->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -329,6 +340,11 @@ class CaseController extends Controller
             }
         }
 
+        $this->logActivity($request, 'duplicated', 'case', $newCase->id, $newCase->our_reference ?: $newCase->title, [
+            'original_id' => $original->id,
+            'original_reference' => $original->our_reference,
+        ]);
+
         return response()->json([
             'case' => $newCase->load(['client:id,first_name,last_name,business_name,client_prefix', 'assignedTo:id,first_name,last_name', 'opposingCounsel:id,name,firm']),
         ], 201);
@@ -344,7 +360,7 @@ class CaseController extends Controller
             ->where('location_id', $request->user()->active_location_id)
             ->findOrFail($id);
 
-        if (!$request->user()->canViewCase($case->assigned_to)) {
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -361,5 +377,103 @@ class CaseController extends Controller
         $case->update($update);
 
         return response()->json(['case' => $case->fresh()]);
+    }
+
+    // ── Collaborators ──
+
+    public function collaborators(Request $request, int $id): JsonResponse
+    {
+        $case = Cases::where('business_id', $request->user()->business_id)
+            ->where('location_id', $request->user()->active_location_id)
+            ->findOrFail($id);
+
+        if (!$request->user()->canViewCase($case->assigned_to, $case->id)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $collaborators = $case->collaborators()
+            ->select('users.id', 'users.first_name', 'users.last_name')
+            ->get()
+            ->map(fn($u) => [
+                'id' => $u->id,
+                'first_name' => $u->first_name,
+                'last_name' => $u->last_name,
+                'added_at' => $u->pivot->created_at,
+            ]);
+
+        return response()->json(['collaborators' => $collaborators]);
+    }
+
+    public function addCollaborator(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $case = Cases::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        // Only lead advocate (assigned_to) or owner can add collaborators.
+        if (!$user->isOwner() && $case->assigned_to !== $user->id) {
+            return response()->json(['message' => 'Only the lead advocate or owner can add collaborators'], 403);
+        }
+
+        $validated = $request->validate([
+            'user_id' => "required|exists:users,id,business_id,{$user->business_id}",
+        ]);
+
+        $collaboratorId = (int) $validated['user_id'];
+
+        if ($collaboratorId === $case->assigned_to) {
+            return response()->json(['message' => 'This user is already the lead advocate on this case'], 422);
+        }
+
+        if ($case->isCollaborator($collaboratorId)) {
+            return response()->json(['message' => 'This user is already a collaborator on this case'], 422);
+        }
+
+        $case->collaborators()->attach($collaboratorId, ['added_by' => $user->id]);
+
+        $collaborator = User::find($collaboratorId);
+        if ($collaborator) {
+            $collaborator->notify(new \App\Notifications\CaseCollaboratorAddedNotification($case, $user));
+        }
+
+        $this->logActivity($request, 'added_collaborator', 'case', $case->id, $case->our_reference ?: $case->title, [
+            'collaborator_id' => $collaboratorId,
+            'collaborator_name' => $collaborator?->user_full_name,
+        ]);
+
+        return response()->json([
+            'collaborator' => [
+                'id' => $collaborator->id,
+                'first_name' => $collaborator->first_name,
+                'last_name' => $collaborator->last_name,
+            ],
+            'message' => 'Collaborator added',
+        ], 201);
+    }
+
+    public function removeCollaborator(Request $request, int $id, int $userId): JsonResponse
+    {
+        $user = $request->user();
+        $case = Cases::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        // Only lead advocate or owner can remove collaborators.
+        if (!$user->isOwner() && $case->assigned_to !== $user->id) {
+            return response()->json(['message' => 'Only the lead advocate or owner can remove collaborators'], 403);
+        }
+
+        $detached = $case->collaborators()->detach($userId);
+
+        if (!$detached) {
+            return response()->json(['message' => 'User is not a collaborator on this case'], 404);
+        }
+
+        $this->logActivity($request, 'removed_collaborator', 'case', $case->id, $case->our_reference ?: $case->title, [
+            'collaborator_id' => $userId,
+        ]);
+
+        return response()->json(['message' => 'Collaborator removed']);
     }
 }

@@ -63,6 +63,17 @@ class CaseSeries extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function collaborators()
+    {
+        return $this->belongsToMany(User::class, 'series_collaborators', 'case_series_id', 'user_id')
+            ->withPivot('added_by', 'created_at');
+    }
+
+    public function isCollaborator(int $userId): bool
+    {
+        return $this->collaborators()->where('user_id', $userId)->exists();
+    }
+
     public function nextSuffix(): string
     {
         $last = $this->last_suffix;

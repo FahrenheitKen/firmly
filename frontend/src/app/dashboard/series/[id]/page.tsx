@@ -32,7 +32,9 @@ interface SeriesDetail {
   active_cases_count: number;
   parent_series?: { id: number; reference: string; name: string } | null;
   child_series?: { id: number; parent_series_id: number; reference: string; name: string }[];
+  assigned_to?: { id: number; first_name: string; last_name: string } | null;
   created_by_user?: { id: number; first_name: string; last_name: string } | null;
+  collaborators?: Array<{ id: number; first_name: string; last_name: string }>;
   active_cases: CaseInSeries[];
 }
 
@@ -59,7 +61,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function SeriesDetailPage() {
-  const { token, can, isOwner } = useAuth();
+  const { token, can, isOwner, user } = useAuth();
   const canCreate = isOwner || can('case.create');
   const canUpdate = isOwner || can('case.update');
   const { toast } = useToast();
@@ -122,6 +124,53 @@ export default function SeriesDetailPage() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
   const [bulkStatus, setBulkStatus] = useState('');
   const [updatingTasks, setUpdatingTasks] = useState(false);
+
+  const [showCollabModal, setShowCollabModal] = useState(false);
+  const [collabUserId, setCollabUserId] = useState('');
+  const [collabSaving, setCollabSaving] = useState(false);
+  const [collabUsers, setCollabUsers] = useState<UserLite[]>([]);
+
+  const isSeriesLead = !!series?.assigned_to && series.assigned_to.id === user?.id;
+  const canManageCollaborators = isOwner || isSeriesLead;
+
+  const openCollabModal = async () => {
+    if (!token) return;
+    if (collabUsers.length === 0) {
+      try {
+        const r = await api.get<{ users: UserLite[] }>('/users?per_page=500', token);
+        setCollabUsers(r.users);
+      } catch { /* ignore */ }
+    }
+    setCollabUserId('');
+    setShowCollabModal(true);
+  };
+
+  const addSeriesCollaborator = async () => {
+    if (!token || !collabUserId || !series) return;
+    setCollabSaving(true);
+    try {
+      const res = await api.post<{ collaborator: { id: number; first_name: string; last_name: string } }>(`/case-series/${series.id}/collaborators`, { user_id: Number(collabUserId) }, token);
+      setSeries((prev) => prev ? { ...prev, collaborators: [...(prev.collaborators || []), res.collaborator] } : prev);
+      setShowCollabModal(false);
+      toast('Collaborator added', 'success');
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      toast(e.message || 'Failed to add collaborator', 'error');
+    } finally {
+      setCollabSaving(false);
+    }
+  };
+
+  const removeSeriesCollaborator = async (userId: number) => {
+    if (!token || !series || !confirm('Remove this collaborator?')) return;
+    try {
+      await api.delete(`/case-series/${series.id}/collaborators/${userId}`, token);
+      setSeries((prev) => prev ? { ...prev, collaborators: (prev.collaborators || []).filter((c) => c.id !== userId) } : prev);
+      toast('Collaborator removed', 'success');
+    } catch {
+      toast('Failed to remove collaborator', 'error');
+    }
+  };
 
   useEffect(() => {
     if (openCaseDropdown === null) return;
@@ -473,6 +522,37 @@ export default function SeriesDetailPage() {
       {series.notes && (
         <div className="mb-4 p-3 bg-gray-50 border border-border rounded-xl text-sm text-muted">{series.notes}</div>
       )}
+
+      <div className="mb-4 bg-card-bg rounded-xl border border-border p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">Collaborators</h3>
+          {canManageCollaborators && (
+            <button onClick={openCollabModal} className="text-xs text-primary hover:underline font-medium">+ Add</button>
+          )}
+        </div>
+        {(series.collaborators && series.collaborators.length > 0) ? (
+          <div className="flex flex-wrap gap-2">
+            {series.collaborators.map((c) => (
+              <div key={c.id} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 border border-blue-100 rounded-lg group">
+                <div className="w-5 h-5 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center text-[9px] font-bold shrink-0">
+                  {c.first_name?.[0]}{c.last_name?.[0]}
+                </div>
+                <span className="text-xs font-medium text-blue-800">{c.first_name} {c.last_name}</span>
+                {canManageCollaborators && (
+                  <button onClick={() => removeSeriesCollaborator(c.id)} className="text-blue-400 hover:text-red-500 ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted">No collaborators</p>
+        )}
+        {series.assigned_to && (
+          <p className="text-xs text-muted mt-2">Lead Advocate: <span className="font-medium text-foreground">{series.assigned_to.first_name} {series.assigned_to.last_name}</span></p>
+        )}
+      </div>
 
       <div className="bg-card-bg rounded-xl border border-border overflow-visible">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -1022,6 +1102,29 @@ export default function SeriesDetailPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={showCollabModal} title="Add Series Collaborator" onClose={() => setShowCollabModal(false)}>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Select Advocate</label>
+            <SearchableSelect
+              label="Advocate"
+              value={collabUserId}
+              onChange={setCollabUserId}
+              options={collabUsers
+                .filter((u) => u.id !== series?.assigned_to?.id && !(series?.collaborators || []).some((c) => c.id === u.id))
+                .map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))}
+              placeholder="Search advocates..."
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowCollabModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={addSeriesCollaborator} disabled={!collabUserId || collabSaving} className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50">
+              {collabSaving ? 'Adding...' : 'Add Collaborator'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </>
   );

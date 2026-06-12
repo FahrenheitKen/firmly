@@ -100,11 +100,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const switchLocation = async (locationId: number) => {
     if (!token) return;
-    const res = await api.post<{ active_location: ActiveLocation }>(`/locations/${locationId}/set-active`, undefined, token);
-    // /clients and /users are scoped to the active location, so cached
-    // responses for the previous location must be dropped.
+    await api.post<{ active_location: ActiveLocation }>(`/locations/${locationId}/set-active`, undefined, token);
+    // Reload so every component fetches data scoped to the new location.
     clearApiCache();
-    setUser((prev) => prev ? { ...prev, active_location: res.active_location } : null);
+    window.location.reload();
   };
 
   const logout = useCallback(async () => {

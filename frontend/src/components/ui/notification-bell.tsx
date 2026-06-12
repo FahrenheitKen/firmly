@@ -24,6 +24,10 @@ function notificationTitle(n: NotificationItem): string {
     const num = n.data.case_number ? `${n.data.case_number} — ` : '';
     return `Case assigned: ${num}${n.data.title ?? ''}`;
   }
+  if (n.data.type === 'case.collaborator_added') {
+    const num = n.data.case_number ? `${n.data.case_number} — ` : '';
+    return `Added as collaborator: ${num}${n.data.title ?? ''}`;
+  }
   return n.data.title ?? 'Notification';
 }
 

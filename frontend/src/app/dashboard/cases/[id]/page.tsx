@@ -80,6 +80,7 @@ interface CaseItem {
   case_series_id: number | null;
   series_suffix: string | null;
   series?: { id: number; reference: string; name: string; common_parties: string | null } | null;
+  collaborators?: Array<{ id: number; first_name: string; last_name: string }>;
   created_at: string;
 }
 
@@ -115,7 +116,7 @@ const priorityColors: Record<string, string> = {
 };
 
 export default function CaseDetailPage() {
-  const { token, can } = useAuth();
+  const { token, can, user, isOwner } = useAuth();
   const formatDate = useFormatDate();
   const canUpdate = can('case.update');
   const canDelete = can('case.delete');
@@ -199,6 +200,52 @@ export default function CaseDetailPage() {
   const [uploadForm, setUploadForm] = useState({ document_name: '', document_date: '' });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadSaving, setUploadSaving] = useState(false);
+  const [showCollabModal, setShowCollabModal] = useState(false);
+  const [collabUserId, setCollabUserId] = useState('');
+  const [collabSaving, setCollabSaving] = useState(false);
+  const [collabUsers, setCollabUsers] = useState<User[]>([]);
+
+  const isLeadAdvocate = !!caseItem?.assigned_to && caseItem.assigned_to.id === user?.id;
+  const canManageCollaborators = isOwner || isLeadAdvocate;
+
+  const openCollabModal = async () => {
+    if (!token) return;
+    if (collabUsers.length === 0) {
+      try {
+        const r = await api.get<{ users: User[] }>('/users?per_page=500', token);
+        setCollabUsers(r.users);
+      } catch { /* ignore */ }
+    }
+    setCollabUserId('');
+    setShowCollabModal(true);
+  };
+
+  const addCollaborator = async () => {
+    if (!token || !collabUserId || !caseItem) return;
+    setCollabSaving(true);
+    try {
+      const res = await api.post<{ collaborator: { id: number; first_name: string; last_name: string } }>(`/cases/${caseItem.id}/collaborators`, { user_id: Number(collabUserId) }, token);
+      setCaseItem((prev) => prev ? { ...prev, collaborators: [...(prev.collaborators || []), res.collaborator] } : prev);
+      setShowCollabModal(false);
+      showToast('Collaborator added', 'success');
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      showToast(e.message || 'Failed to add collaborator', 'error');
+    } finally {
+      setCollabSaving(false);
+    }
+  };
+
+  const removeCollaborator = async (userId: number) => {
+    if (!token || !caseItem || !confirm('Remove this collaborator?')) return;
+    try {
+      await api.delete(`/cases/${caseItem.id}/collaborators/${userId}`, token);
+      setCaseItem((prev) => prev ? { ...prev, collaborators: (prev.collaborators || []).filter((c) => c.id !== userId) } : prev);
+      showToast('Collaborator removed', 'success');
+    } catch {
+      showToast('Failed to remove collaborator', 'error');
+    }
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -839,8 +886,37 @@ export default function CaseDetailPage() {
               )}
             </div>
             <div>
-              <p className="text-xs text-muted font-medium uppercase tracking-wider">Assigned To</p>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Lead Advocate</p>
               <p className="text-sm mt-0.5">{caseItem.assigned_to ? `${caseItem.assigned_to.first_name} ${caseItem.assigned_to.last_name}` : 'Unassigned'}</p>
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted font-medium uppercase tracking-wider">Collaborators</p>
+                {canManageCollaborators && (
+                  <button onClick={openCollabModal} className="text-xs text-primary hover:underline font-medium">+ Add</button>
+                )}
+              </div>
+              {(caseItem.collaborators && caseItem.collaborators.length > 0) ? (
+                <div className="mt-1.5 space-y-1.5">
+                  {caseItem.collaborators.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between group">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+                          {c.first_name?.[0]}{c.last_name?.[0]}
+                        </div>
+                        <span className="text-sm">{c.first_name} {c.last_name}</span>
+                      </div>
+                      {canManageCollaborators && (
+                        <button onClick={() => removeCollaborator(c.id)} className="text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity" title="Remove collaborator">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted mt-0.5">None</p>
+              )}
             </div>
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Created By</p>
@@ -1860,6 +1936,29 @@ export default function CaseDetailPage() {
         onClose={() => setDrawerTaskId(null)}
         onTaskChanged={fetchCaseTasks}
       />
+
+      <Modal open={showCollabModal} title="Add Collaborator" onClose={() => setShowCollabModal(false)}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Select Advocate</label>
+              <SearchableSelect
+                label="Advocate"
+                value={collabUserId}
+                onChange={setCollabUserId}
+                options={collabUsers
+                  .filter((u) => u.id !== caseItem?.assigned_to?.id && !(caseItem?.collaborators || []).some((c) => c.id === u.id))
+                  .map((u) => ({ value: String(u.id), label: `${u.first_name} ${u.last_name}`.trim() }))}
+                placeholder="Search advocates..."
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowCollabModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={addCollaborator} disabled={!collabUserId || collabSaving} className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50">
+                {collabSaving ? 'Adding...' : 'Add Collaborator'}
+              </button>
+            </div>
+          </div>
+      </Modal>
 
       {previewUrl && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/70" onClick={closePreview}>

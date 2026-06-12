@@ -16,6 +16,8 @@ use Spatie\Permission\Models\Role;
 
 class UserManagementController extends Controller
 {
+    use \App\Traits\LogsActivity;
+
     public function index(Request $request): JsonResponse
     {
         $businessId = $request->user()->business_id;
@@ -175,6 +177,8 @@ class UserManagementController extends Controller
         $businessName = $request->user()->business->name ?? 'Firmly';
         $user->notify(new WelcomeUserNotification($temporaryPassword, $businessName));
 
+        $this->logActivity($request, 'created', 'user', $user->id, trim($user->first_name . ' ' . ($user->last_name ?? '')));
+
         return response()->json([
             'user' => $user->load('roles'),
         ], 201);
@@ -307,7 +311,11 @@ class UserManagementController extends Controller
             return response()->json(['message' => 'Cannot delete business owner'], 422);
         }
 
+        $label = trim($user->first_name . ' ' . ($user->last_name ?? ''));
         $user->delete();
+
+        $this->logActivity($request, 'deleted', 'user', $id, $label);
+
         return response()->json(['message' => 'User deleted']);
     }
 
@@ -368,6 +376,7 @@ class UserManagementController extends Controller
             'case.view_own', 'case.view_all', 'case.create', 'case.update', 'case.delete',
             'client.create', 'client.update', 'client.delete',
             'task.view_own', 'task.view_all', 'task.create', 'task.update', 'task.delete',
+            'activity_log.view',
             'product.view', 'product.create', 'product.update', 'product.delete',
             'purchase.view', 'purchase.create', 'purchase.update', 'purchase.delete',
             'sell.view', 'sell.create', 'sell.update', 'sell.delete',
@@ -508,6 +517,7 @@ class UserManagementController extends Controller
                 'task.view_own', 'task.view_all', 'task.create', 'task.update', 'task.delete',
                 'expense.view_own', 'expense.view_all', 'expense.create', 'expense.update', 'expense.delete', 'expense.approve',
                 'expense_report.view',
+                'activity_log.view',
             ],
         ]);
     }

@@ -12,6 +12,7 @@ use App\Models\CourtProceeding;
 use App\Models\Task;
 use App\Models\User;
 use App\Notifications\CaseAssignedNotification;
+use App\Notifications\CaseCollaboratorAddedNotification;
 use App\Notifications\TaskAssignedNotification;
 use App\Rules\NotKenyaHoliday;
 use App\Services\TenantDocumentStorage;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\DB;
 
 class CaseSeriesController extends Controller
 {
+    use \App\Traits\LogsActivity;
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -32,9 +35,13 @@ class CaseSeriesController extends Controller
 
         $query = CaseSeries::where('business_id', $user->business_id)
             ->where('location_id', $user->active_location_id)
-            ->when($viewOwnOnly, fn($q) => $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)))
+            ->when($viewOwnOnly, fn($q) => $q->where(function ($q) use ($user) {
+                $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)->orWhereHas('collaborators', fn($cc) => $cc->where('user_id', $user->id)))
+                  ->orWhere('assigned_to', $user->id)
+                  ->orWhereHas('collaborators', fn($c) => $c->where('user_id', $user->id));
+            }))
             ->when($viewOwnOnly,
-                fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)]),
+                fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)->orWhereHas('collaborators', fn($cc) => $cc->where('user_id', $user->id))]),
                 fn($q) => $q->withCount('activeCases')
             )
             ->with(['parentSeries:id,reference,name', 'childSeries:id,parent_series_id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name']);
@@ -107,6 +114,8 @@ class CaseSeriesController extends Controller
             'created_by' => $user->id,
         ]);
 
+        $this->logActivity($request, 'created', 'series', $series->id, $series->reference);
+
         return response()->json([
             'series' => $series->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name']),
         ], 201);
@@ -119,16 +128,20 @@ class CaseSeriesController extends Controller
 
         $query = CaseSeries::where('business_id', $user->business_id)
             ->where('location_id', $user->active_location_id)
-            ->when($viewOwnOnly, fn($q) => $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)));
+            ->when($viewOwnOnly, fn($q) => $q->where(function ($q) use ($user) {
+                $q->whereHas('activeCases', fn($c) => $c->where('assigned_to', $user->id)->orWhereHas('collaborators', fn($cc) => $cc->where('user_id', $user->id)))
+                  ->orWhere('assigned_to', $user->id)
+                  ->orWhereHas('collaborators', fn($c) => $c->where('user_id', $user->id));
+            }));
 
         $casesEagerLoad = fn($q) => $q->select('id', 'case_series_id', 'series_suffix', 'case_number', 'title', 'our_reference', 'status', 'assigned_to', 'client_id')
-            ->when($viewOwnOnly, fn($c) => $c->where('assigned_to', $user->id))
+            ->when($viewOwnOnly, fn($c) => $c->where('assigned_to', $user->id)->orWhereHas('collaborators', fn($cc) => $cc->where('user_id', $user->id)))
             ->with(['assignedTo:id,first_name,last_name', 'client:id,first_name,last_name,business_name'])
             ->orderByRaw("FIELD(series_suffix, '') DESC, series_suffix ASC");
 
         $series = $query
             ->when($viewOwnOnly,
-                fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)]),
+                fn($q) => $q->withCount(['activeCases' => fn($c) => $c->where('assigned_to', $user->id)->orWhereHas('collaborators', fn($cc) => $cc->where('user_id', $user->id))]),
                 fn($q) => $q->withCount('activeCases')
             )
             ->with([
@@ -137,6 +150,7 @@ class CaseSeriesController extends Controller
                 'createdByUser:id,first_name,last_name',
                 'client:id,first_name,last_name,business_name',
                 'assignedTo:id,first_name,last_name',
+                'collaborators:id,first_name,last_name',
                 'activeCases' => $casesEagerLoad,
             ])
             ->findOrFail($id);
@@ -177,6 +191,8 @@ class CaseSeriesController extends Controller
 
         $series->update($validated);
 
+        $this->logActivity($request, 'updated', 'series', $series->id, $series->reference);
+
         return response()->json(['series' => $series->fresh()->load(['parentSeries:id,reference,name', 'createdByUser:id,first_name,last_name', 'client:id,first_name,last_name,business_name', 'assignedTo:id,first_name,last_name'])]);
     }
 
@@ -193,7 +209,10 @@ class CaseSeriesController extends Controller
 
         Cases::where('case_series_id', $series->id)->update(['case_series_id' => null, 'series_suffix' => null]);
 
+        $label = $series->reference;
         $series->delete();
+
+        $this->logActivity($request, 'deleted', 'series', $id, $label);
 
         return response()->json(['message' => 'Series deleted. Cases have been detached.']);
     }
@@ -616,5 +635,102 @@ class CaseSeriesController extends Controller
             'message' => "Updated {$updated} task(s) to {$validated['status']}.",
             'updated' => $updated,
         ]);
+    }
+
+    // ── Collaborators ──
+
+    public function collaborators(Request $request, int $id): JsonResponse
+    {
+        $series = CaseSeries::where('business_id', $request->user()->business_id)
+            ->where('location_id', $request->user()->active_location_id)
+            ->findOrFail($id);
+
+        $collaborators = $series->collaborators()
+            ->select('users.id', 'users.first_name', 'users.last_name')
+            ->get()
+            ->map(fn($u) => [
+                'id' => $u->id,
+                'first_name' => $u->first_name,
+                'last_name' => $u->last_name,
+                'added_at' => $u->pivot->created_at,
+            ]);
+
+        return response()->json(['collaborators' => $collaborators]);
+    }
+
+    public function addCollaborator(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $series = CaseSeries::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        if (!$user->isOwner() && $series->assigned_to !== $user->id) {
+            return response()->json(['message' => 'Only the lead advocate or owner can add collaborators'], 403);
+        }
+
+        $validated = $request->validate([
+            'user_id' => "required|exists:users,id,business_id,{$user->business_id}",
+        ]);
+
+        $collaboratorId = (int) $validated['user_id'];
+
+        if ($collaboratorId === $series->assigned_to) {
+            return response()->json(['message' => 'This user is already the lead advocate on this series'], 422);
+        }
+
+        if ($series->isCollaborator($collaboratorId)) {
+            return response()->json(['message' => 'This user is already a collaborator on this series'], 422);
+        }
+
+        $series->collaborators()->attach($collaboratorId, ['added_by' => $user->id]);
+
+        // Notify via case collaborator notification (reuse — links to series cases)
+        $collaborator = User::find($collaboratorId);
+        if ($collaborator) {
+            // Use the first case in the series for the notification link, or create a simple DB notification
+            $firstCase = $series->activeCases()->first();
+            if ($firstCase) {
+                $collaborator->notify(new CaseCollaboratorAddedNotification($firstCase, $user));
+            }
+        }
+
+        $this->logActivity($request, 'added_collaborator', 'series', $series->id, $series->reference, [
+            'collaborator_id' => $collaboratorId,
+            'collaborator_name' => $collaborator?->user_full_name,
+        ]);
+
+        return response()->json([
+            'collaborator' => [
+                'id' => $collaborator->id,
+                'first_name' => $collaborator->first_name,
+                'last_name' => $collaborator->last_name,
+            ],
+            'message' => 'Collaborator added',
+        ], 201);
+    }
+
+    public function removeCollaborator(Request $request, int $id, int $userId): JsonResponse
+    {
+        $user = $request->user();
+        $series = CaseSeries::where('business_id', $user->business_id)
+            ->where('location_id', $user->active_location_id)
+            ->findOrFail($id);
+
+        if (!$user->isOwner() && $series->assigned_to !== $user->id) {
+            return response()->json(['message' => 'Only the lead advocate or owner can remove collaborators'], 403);
+        }
+
+        $detached = $series->collaborators()->detach($userId);
+
+        if (!$detached) {
+            return response()->json(['message' => 'User is not a collaborator on this series'], 404);
+        }
+
+        $this->logActivity($request, 'removed_collaborator', 'series', $series->id, $series->reference, [
+            'collaborator_id' => $userId,
+        ]);
+
+        return response()->json(['message' => 'Collaborator removed']);
     }
 }
