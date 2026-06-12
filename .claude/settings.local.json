@@ -238,7 +238,8 @@
       "Bash(echo \"services: $\\(systemctl is-active firmly-frontend firmly-queue php8.2-fpm)",
       "Bash(git pull *)",
       "Bash(git stash *)",
-      "Bash(awk '/function activityLog/,/^    }/' app/Http/Controllers/ReportController.php)"
+      "Bash(awk '/function activityLog/,/^    }/' app/Http/Controllers/ReportController.php)",
+      "Bash(sort -t: -k2 -n)"
     ]
   },
   "enableAllProjectMcpServers": true,

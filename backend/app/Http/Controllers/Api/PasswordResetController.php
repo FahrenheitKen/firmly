@@ -65,7 +65,7 @@ class PasswordResetController extends Controller
             return response()->json(['message' => 'Invalid or expired reset token'], 400);
         }
 
-        if ($record->created_at && now()->diffInMinutes($record->created_at) > 60) {
+        if ($record->created_at && \Illuminate\Support\Carbon::parse($record->created_at)->diffInMinutes(now()) > 60) {
             DB::table('password_reset_tokens')->where('email', $request->email)->delete();
             return response()->json(['message' => 'Reset token has expired'], 400);
         }

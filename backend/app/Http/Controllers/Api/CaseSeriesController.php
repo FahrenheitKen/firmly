@@ -409,6 +409,7 @@ class CaseSeriesController extends Controller
         foreach ($cases as $case) {
             CourtProceeding::create(array_merge($validated, [
                 'case_id' => $case->id,
+                'business_id' => $case->business_id,
                 'created_by' => $user->id,
             ]));
             $created++;
